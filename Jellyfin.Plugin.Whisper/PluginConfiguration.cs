@@ -8,10 +8,10 @@ namespace Jellyfin.Plugin.Whisper;
 public class PluginConfiguration : BasePluginConfiguration
 {
     /// <summary>
-    /// Gets or sets the path to the whisper-cpp binary.
-    /// Defaults to "whisper-cpp" (assumes it is on PATH via homebrew).
+    /// Gets or sets the path to the whisper-cli binary.
+    /// Defaults to "whisper-cli" (assumes it is on PATH via homebrew).
     /// </summary>
-    public string WhisperCppPath { get; set; } = "whisper-cpp";
+    public string WhisperCppPath { get; set; } = "whisper-cli";
 
     /// <summary>
     /// Gets or sets the path to the ffmpeg binary used for audio extraction.

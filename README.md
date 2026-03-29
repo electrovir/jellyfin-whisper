@@ -25,21 +25,24 @@ You must install these yourself -- the plugin does **not** install them automati
 
 ### whisper.cpp
 
-The plugin calls the `whisper-cpp` CLI binary directly. Install it via Homebrew:
+The plugin calls the `whisper-cli` binary (from the whisper.cpp project). Install via Homebrew:
 
 ```sh
 brew install whisper-cpp
 ```
 
-Or build from source: https://github.com/ggml-org/whisper.cpp#building
-
-You also need a whisper model file. The plugin defaults to `medium`, but you can use any model supported by whisper.cpp (`tiny`, `base`, `small`, `medium`, `large`). Download models via:
+The binary is named `whisper-cli` (not `whisper-cpp`). Verify it works:
 
 ```sh
-# Homebrew installs models to a default location whisper-cpp can find.
-# If building from source, download manually:
-whisper-cpp --download-model medium
+whisper-cli --help
 ```
+
+Or build from source: https://github.com/ggml-org/whisper.cpp#building
+
+You also need a whisper model file. The plugin defaults to `medium`, but you can use any model supported by whisper.cpp (`tiny`, `base`, `small`, `medium`, `large`). Download models from:
+
+- https://huggingface.co/ggerganov/whisper.cpp/tree/main
+- https://ggml.ggerganov.com/
 
 ### ffmpeg
 
@@ -66,7 +69,7 @@ Open **Dashboard > Plugins > Whisper Transcription** in the Jellyfin web UI.
 
 | Setting | Default | Description |
 |---|---|---|
-| **whisper-cpp Binary Path** | `whisper-cpp` | Path to the whisper-cpp binary. If installed via Homebrew it should be on PATH already. |
+| **whisper-cpp Binary Path** | `whisper-cli` | Path to the whisper-cli binary. If installed via Homebrew it should be on PATH already. |
 | **ffmpeg Binary Path** | `ffmpeg` | Path to ffmpeg. Usually already available in Jellyfin. |
 | **Whisper Model** | `medium` | Model name or path passed to `--model`. Larger models are more accurate but slower. |
 | **Mute Words / Phrases** | Common profanity list | One word or phrase per line. Case-insensitive. Punctuation is stripped when matching. Multi-word phrases match against consecutive whisper tokens. |
