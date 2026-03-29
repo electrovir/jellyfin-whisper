@@ -27,13 +27,29 @@ jobs:
         id: sha
         run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
 
+      - name: Get changelog since last release
+        id: changelog
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+          if [ -z "$LAST_TAG" ]; then
+            LOG=$(git log --pretty=format:'- %h %an: %s' --no-merges)
+          else
+            LOG=$(git log "${LAST_TAG}..HEAD" --pretty=format:'- %h %an: %s' --no-merges)
+          fi
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "log<<$EOF" >> "$GITHUB_OUTPUT"
+          echo "$LOG" >> "$GITHUB_OUTPUT"
+          echo "$EOF" >> "$GITHUB_OUTPUT"
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: build-${{ steps.sha.outputs.short }}
           name: ${{ steps.sha.outputs.short }}
           body: |
-            Automated build from commit ${{ github.sha }}.
+            ## Changes since last release
+
+            ${{ steps.changelog.outputs.log }}
           make_latest: ${{ github.ref_name == github.event.repository.default_branch }}
           files: |
             Jellyfin.Plugin.Whisper/bin/Release/net8.0/Jellyfin.Plugin.Whisper.dll
