@@ -129,7 +129,8 @@ public class EdlGenerator
                 {
                     regions.Add(new MuteRegion(
                         Math.Max(0, token.Offsets.From - bufferMs),
-                        token.Offsets.To + bufferMs));
+                        token.Offsets.To + bufferMs,
+                        clean));
                 }
             }
 
@@ -158,7 +159,8 @@ public class EdlGenerator
                     {
                         regions.Add(new MuteRegion(
                             Math.Max(0, segment.Tokens[i].Offsets.From - bufferMs),
-                            segment.Tokens[i + phrase.Length - 1].Offsets.To + bufferMs));
+                            segment.Tokens[i + phrase.Length - 1].Offsets.To + bufferMs,
+                            string.Join(" ", phrase)));
                     }
                 }
             }
@@ -183,7 +185,10 @@ public class EdlGenerator
             var last = merged[^1];
             if (sorted[i].StartMs <= last.EndMs)
             {
-                merged[^1] = new MuteRegion(last.StartMs, Math.Max(last.EndMs, sorted[i].EndMs));
+                var combinedWord = last.MatchedWord == sorted[i].MatchedWord
+                    ? last.MatchedWord
+                    : $"{last.MatchedWord}, {sorted[i].MatchedWord}";
+                merged[^1] = new MuteRegion(last.StartMs, Math.Max(last.EndMs, sorted[i].EndMs), combinedWord);
             }
             else
             {
@@ -200,18 +205,19 @@ public class EdlGenerator
         CancellationToken cancellationToken)
     {
         // EDL format: START_SECONDS<tab>END_SECONDS<tab>ACTION
-        // Action 1 = mute audio.
+        // Action 1 = mute audio. Comment lines start with ##.
         var lines = regions.Select(r =>
             string.Format(
                 CultureInfo.InvariantCulture,
-                "{0:F3}\t{1:F3}\t1",
+                "## {2}\n{0:F3}\t{1:F3}\t1",
                 r.StartMs / 1000.0,
-                r.EndMs / 1000.0));
+                r.EndMs / 1000.0,
+                r.MatchedWord));
 
         await File.WriteAllLinesAsync(edlPath, lines, cancellationToken).ConfigureAwait(false);
     }
 
-    private sealed record MuteRegion(long StartMs, long EndMs);
+    private sealed record MuteRegion(long StartMs, long EndMs, string MatchedWord);
 }
 
 // --- whisper.cpp JSON output models (--output-json-full) ---

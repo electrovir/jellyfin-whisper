@@ -58,11 +58,15 @@ public class WhisperProcessor
 
         try
         {
+            WhisperFileLogger.Info($"Step 1/3: Extracting audio from: {mediaPath}");
             _logger.LogInformation("Extracting audio from: {MediaPath}", mediaPath);
             await ExtractAudioAsync(mediaPath, wavPath, cancellationToken).ConfigureAwait(false);
 
+            var wavSize = new FileInfo(wavPath).Length / (1024.0 * 1024.0);
+            WhisperFileLogger.Info($"Step 2/3: Audio extracted ({wavSize:F0} MB). Running whisper-cli on: {mediaPath}");
             _logger.LogInformation("Running whisper.cpp on: {MediaPath}", mediaPath);
             await RunWhisperAsync(wavPath, outputDir, cancellationToken).ConfigureAwait(false);
+            WhisperFileLogger.Info($"Step 3/3: Whisper complete. Generating EDL for: {mediaPath}");
 
             // Generate EDL mute file from the transcription if mute words are configured.
             var transcriptionPath = Path.Combine(outputDir, "transcription.json");
