@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using Jellyfin.Plugin.Whisper;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Common.Plugins;
 using MediaBrowser.Model.Plugins;

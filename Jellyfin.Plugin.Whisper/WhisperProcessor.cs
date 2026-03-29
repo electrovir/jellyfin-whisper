@@ -13,6 +13,7 @@ namespace Jellyfin.Plugin.Whisper;
 public class WhisperProcessor
 {
     private const string CompleteMarker = ".complete";
+    private const string EdlAppliedMarker = ".edl-applied";
 
     private readonly PluginConfiguration _config;
     private readonly ILogger _logger;
@@ -33,6 +34,46 @@ public class WhisperProcessor
     {
         return Directory.Exists(whisperDir)
             && File.Exists(Path.Combine(whisperDir, CompleteMarker));
+    }
+
+    /// <summary>
+    /// Returns true if transcription is done but EDL filtering hasn't been applied yet.
+    /// </summary>
+    public static bool NeedsEdlFiltering(string whisperDir)
+    {
+        if (!Directory.Exists(whisperDir))
+        {
+            return false;
+        }
+
+        var edlPath = Path.Combine(whisperDir, "transcription.edl");
+        var edlAppliedPath = Path.Combine(whisperDir, EdlAppliedMarker);
+
+        return File.Exists(edlPath) && !File.Exists(edlAppliedPath);
+    }
+
+    /// <summary>
+    /// Applies EDL filtering only (no transcription). For already-transcribed files
+    /// that need their filtered audio tracks re-created.
+    /// </summary>
+    public async Task ApplyEdlFilteringAsync(string mediaPath, string outputDir, CancellationToken cancellationToken)
+    {
+        var edlPath = Path.Combine(outputDir, "transcription.edl");
+        var edlAppliedPath = Path.Combine(outputDir, EdlAppliedMarker);
+
+        if (!File.Exists(edlPath))
+        {
+            return;
+        }
+
+        WhisperFileLogger.Info($"Re-applying EDL as filtered audio tracks to: {mediaPath}");
+        var filterer = new AudioTrackFilterer(_config.FfmpegPath, _logger);
+        await filterer.FilterAsync(mediaPath, edlPath, cancellationToken).ConfigureAwait(false);
+
+        await File.WriteAllTextAsync(
+            edlAppliedPath,
+            $"Applied at {DateTime.UtcNow:O}",
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -58,18 +99,20 @@ public class WhisperProcessor
 
         try
         {
-            WhisperFileLogger.Info($"Step 1/3: Extracting audio from: {mediaPath}");
+            WhisperFileLogger.Info($"Step 1/4: Extracting audio from: {mediaPath}");
             _logger.LogInformation("Extracting audio from: {MediaPath}", mediaPath);
             await ExtractAudioAsync(mediaPath, wavPath, cancellationToken).ConfigureAwait(false);
 
             var wavSize = new FileInfo(wavPath).Length / (1024.0 * 1024.0);
-            WhisperFileLogger.Info($"Step 2/3: Audio extracted ({wavSize:F0} MB). Running whisper-cli on: {mediaPath}");
+            WhisperFileLogger.Info($"Step 2/4: Audio extracted ({wavSize:F0} MB). Running whisper-cli on: {mediaPath}");
             _logger.LogInformation("Running whisper.cpp on: {MediaPath}", mediaPath);
             await RunWhisperAsync(wavPath, outputDir, cancellationToken).ConfigureAwait(false);
-            WhisperFileLogger.Info($"Step 3/3: Whisper complete. Generating EDL for: {mediaPath}");
+            WhisperFileLogger.Info($"Step 3/4: Whisper complete. Generating EDL for: {mediaPath}");
 
             // Generate EDL mute file from the transcription if mute words are configured.
             var transcriptionPath = Path.Combine(outputDir, "transcription.json");
+            var edlPath = EdlGenerator.GetEdlPath(transcriptionPath);
+
             if (File.Exists(transcriptionPath) && !string.IsNullOrWhiteSpace(_config.MuteWords))
             {
                 _logger.LogInformation("Generating EDL for: {MediaPath}", mediaPath);
@@ -79,6 +122,20 @@ public class WhisperProcessor
                     mediaPath,
                     _config.MuteWords,
                     _config.EdlBufferMs,
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            // Apply EDL mute regions as filtered audio tracks in the MKV.
+            var edlAppliedPath = Path.Combine(outputDir, EdlAppliedMarker);
+            if (File.Exists(edlPath) && !File.Exists(edlAppliedPath))
+            {
+                WhisperFileLogger.Info($"Step 4/4: Applying EDL as filtered audio tracks to: {mediaPath}");
+                var filterer = new AudioTrackFilterer(_config.FfmpegPath, _logger);
+                await filterer.FilterAsync(mediaPath, edlPath, cancellationToken).ConfigureAwait(false);
+
+                await File.WriteAllTextAsync(
+                    edlAppliedPath,
+                    $"Applied at {DateTime.UtcNow:O}",
                     cancellationToken).ConfigureAwait(false);
             }
 

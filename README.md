@@ -1,22 +1,26 @@
 # Jellyfin Whisper Transcription Plugin
 
-A Jellyfin plugin that automatically transcribes media files using [whisper.cpp](https://github.com/ggml-org/whisper.cpp) and generates EDL (Edit Decision List) mute files for profanity filtering.
+A Jellyfin plugin that automatically transcribes media files using [whisper.cpp](https://github.com/ggml-org/whisper.cpp), generates EDL mute files for profanity filtering, and bakes filtered audio tracks directly into MKV files so muting works with direct play on all clients.
 
 ## What It Does
 
 1. Extracts audio from every movie and episode in your Jellyfin library.
 2. Runs whisper.cpp to produce word-level transcription JSON.
 3. Scans the transcription for configurable mute words/phrases and generates a `.edl` file with mute timestamps.
+4. Adds filtered audio tracks to the MKV with those words muted. Original audio is preserved.
+
+Users can switch between the filtered and original audio tracks in the Jellyfin player on any client (web, iOS, Apple TV, etc.) without any transcoding.
 
 Output is stored in a `.whisper/` directory next to each media file:
 
 ```
 /media/movies/
-├── Movie.mkv
+├── Movie.mkv              # Now contains filtered + original audio tracks
 └── Movie.whisper/
-    ├── transcription.json   # Full whisper output with per-word timestamps
-    ├── transcription.edl    # Mute regions for matched words
-    └── .complete            # Marker indicating processing finished
+    ├── transcription.json  # Full whisper output with per-word timestamps
+    ├── transcription.edl   # Mute regions for matched words (with comments)
+    ├── .edl-applied        # Marker indicating filtered tracks were added
+    └── .complete           # Marker indicating processing finished
 ```
 
 ## Prerequisites
@@ -52,7 +56,7 @@ Available models (trade-off between speed and accuracy): `ggml-tiny.bin`, `ggml-
 
 ### ffmpeg
 
-Used to extract audio from media files. Most Jellyfin installations already have ffmpeg available. If not:
+Used to extract audio from media files and to create filtered audio tracks. Most Jellyfin installations already have ffmpeg available. If not:
 
 ```sh
 brew install ffmpeg
@@ -103,14 +107,14 @@ ls $(brew --prefix whisper-cpp)/bin/
 
 ### Actions
 
-- **Regenerate All EDL Files** -- Re-creates EDL files from existing transcription JSON using the current word list. Fast (seconds), does not re-run whisper.
+- **Regenerate All EDL Files** -- Re-creates EDL files from existing transcription JSON using the current word list. Also clears `.edl-applied` markers so filtered audio tracks will be re-created with the updated word list on the next processing run.
 - **Reset All Transcriptions** -- Wipes `.complete` markers so all media will be re-transcribed on the next run.
 
 ## How Processing Works
 
 Processing is triggered three ways:
 
-1. **On startup** -- the plugin scans the library and queues any media without a `.complete` marker.
+1. **On startup** -- the plugin scans the library and queues any media that needs processing or re-filtering.
 2. **Scheduled task** -- "Process Media with Whisper" runs daily at 2 AM UTC by default (configurable in Jellyfin's scheduled tasks).
 3. **Library events** -- newly added media is queued automatically.
 
@@ -119,7 +123,20 @@ Files are processed one at a time in a background queue. For each media file:
 1. ffmpeg extracts audio as 16 kHz mono WAV (required by whisper.cpp).
 2. whisper.cpp transcribes the audio with `--output-json-full` for word-level timestamps.
 3. The EDL generator scans tokens against the mute word list, adds the configured buffer around matches, merges overlapping regions, and writes the `.edl` file.
-4. The intermediate WAV is cleaned up.
+4. For each English audio track in the MKV, a filtered copy is created with the muted words silenced (volume=0) and added as a new track named "(filtered) Original Track Name".
+5. The filtered tracks are set as default. Users can switch to the original unfiltered tracks in their player at any time.
+6. The intermediate WAV is cleaned up.
+
+### Filtered Audio Tracks
+
+The plugin adds new audio tracks to your MKV files with profanity muted. The original audio tracks are **never modified or removed**.
+
+- Filtered tracks are named `(filtered) <original track name>` (e.g., "(filtered) Stereo")
+- Filtered tracks are set as the default audio track
+- Original tracks remain selectable in the player
+- Encoded as AAC (256 kbps for stereo, 640 kbps for surround)
+- Works with direct play on all clients -- no transcoding needed
+- Fully reversible: regenerate EDL files to re-create filtered tracks with a different word list
 
 ### Processing Time
 
@@ -137,18 +154,16 @@ Times vary by hardware. whisper.cpp supports Metal (Apple Silicon) and CUDA (NVI
 
 ## EDL File Format
 
-The generated `.edl` files use tab-separated values:
+The generated `.edl` files use tab-separated values with comments indicating the matched word:
 
 ```
-START_SECONDS	END_SECONDS	ACTION_TYPE
-```
-
-Action type `1` means mute. Example:
-
-```
+## damn
 12.350	13.100	1
+## oh my god
 45.800	46.550	1
 ```
+
+Action type `1` means mute. Comment lines starting with `##` show which word/phrase triggered each mute region.
 
 ## API Endpoints
 
@@ -156,6 +171,16 @@ All endpoints require admin authentication.
 
 | Method | Endpoint | Description |
 |---|---|---|
-| `POST` | `/Whisper/RegenerateEdls` | Regenerate EDL files from existing transcriptions. |
+| `POST` | `/Whisper/RegenerateEdls` | Regenerate EDL files from existing transcriptions and clear `.edl-applied` markers for re-filtering. |
 | `POST` | `/Whisper/WipeAllMarkers` | Wipe all `.complete` markers and re-queue everything. |
 | `POST` | `/Whisper/ProcessItem/{itemId}` | Delete existing output and re-process a single item. |
+
+## Logging
+
+The plugin writes a dedicated log file at `<plugin-dir>/whisper.log` (e.g. `~/Library/Application Support/jellyfin/plugins/Whisper/whisper.log`). This contains only whisper plugin activity and is much smaller than the full Jellyfin log.
+
+Watch it live:
+
+```sh
+tail -f ~/Library/Application\ Support/jellyfin/plugins/Whisper/whisper.log
+```

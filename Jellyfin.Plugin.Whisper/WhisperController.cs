@@ -135,6 +135,15 @@ public class WhisperController : ControllerBase
                     config.MuteWords,
                     config.EdlBufferMs,
                     CancellationToken.None).ConfigureAwait(false);
+
+                // Delete .edl-applied marker so filtered audio tracks will be
+                // re-created with the updated EDL on the next processing run.
+                var edlAppliedPath = Path.Combine(whisperDir, ".edl-applied");
+                if (System.IO.File.Exists(edlAppliedPath))
+                {
+                    System.IO.File.Delete(edlAppliedPath);
+                }
+
                 generated++;
             }
             catch (Exception ex)
@@ -143,7 +152,10 @@ public class WhisperController : ControllerBase
             }
         }
 
-        _logger.LogInformation("Regenerated {Count} EDL file(s).", generated);
+        // Re-scan so items with deleted .edl-applied markers get re-queued for filtering.
+        _queueService.EnqueueUnprocessedItems();
+
+        _logger.LogInformation("Regenerated {Count} EDL file(s). Items will be re-filtered on next processing run.", generated);
         return Ok(new { generated });
     }
 

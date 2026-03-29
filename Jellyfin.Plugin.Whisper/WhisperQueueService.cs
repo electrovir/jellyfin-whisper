@@ -54,7 +54,11 @@ public class WhisperQueueService : IHostedService, IDisposable
         if (!force)
         {
             var whisperDir = WhisperProcessor.GetWhisperDirectory(mediaPath);
-            if (WhisperProcessor.IsAlreadyProcessed(whisperDir))
+            var alreadyProcessed = WhisperProcessor.IsAlreadyProcessed(whisperDir);
+            var needsFiltering = WhisperProcessor.NeedsEdlFiltering(whisperDir);
+
+            // Skip if fully processed AND doesn't need re-filtering.
+            if (alreadyProcessed && !needsFiltering)
             {
                 return false;
             }
@@ -196,13 +200,24 @@ public class WhisperQueueService : IHostedService, IDisposable
                     var processor = new WhisperProcessor(config, _logger);
                     var whisperDir = WhisperProcessor.GetWhisperDirectory(entry.MediaPath);
 
-                    var logMsg = $"Processing: {entry.MediaPath} (whisper-cli: {config.WhisperCppPath}, model: {config.WhisperModel})";
-                    _logger.LogInformation("{Message}", logMsg);
-                    WhisperFileLogger.Info(logMsg);
+                    // Check if this item only needs EDL re-filtering (transcription already done).
+                    if (WhisperProcessor.IsAlreadyProcessed(whisperDir) && WhisperProcessor.NeedsEdlFiltering(whisperDir))
+                    {
+                        WhisperFileLogger.Info($"Re-filtering: {entry.MediaPath}");
+                        await processor.ApplyEdlFilteringAsync(entry.MediaPath, whisperDir, cancellationToken).ConfigureAwait(false);
+                        consecutiveFailures = 0;
+                        WhisperFileLogger.Info($"Re-filtering complete: {entry.MediaPath}");
+                    }
+                    else
+                    {
+                        var logMsg = $"Processing: {entry.MediaPath} (whisper-cli: {config.WhisperCppPath}, model: {config.WhisperModel})";
+                        _logger.LogInformation("{Message}", logMsg);
+                        WhisperFileLogger.Info(logMsg);
 
-                    await processor.ProcessAsync(entry.MediaPath, whisperDir, cancellationToken).ConfigureAwait(false);
-                    consecutiveFailures = 0;
-                    WhisperFileLogger.Info($"Complete: {entry.MediaPath}");
+                        await processor.ProcessAsync(entry.MediaPath, whisperDir, cancellationToken).ConfigureAwait(false);
+                        consecutiveFailures = 0;
+                        WhisperFileLogger.Info($"Complete: {entry.MediaPath}");
+                    }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
