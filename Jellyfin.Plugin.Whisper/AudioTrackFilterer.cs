@@ -270,12 +270,15 @@ public class AudioTrackFilterer
             // Try to match the original codec; fall back to ac3 for surround or aac for stereo.
             var (encoderCodec, encoderBitrate) = GetEncoderForCodec(stream.CodecName, stream.Profile, channels);
 
+            // AC3 supports at most 5.1 (6 channels); downmix if needed.
+            var outputChannels = encoderCodec == "ac3" && channels > 6 ? 6 : channels;
+
             args.Add($"-c:a:{outputAudioIndex}");
             args.Add(encoderCodec);
             args.Add($"-b:a:{outputAudioIndex}");
             args.Add(encoderBitrate);
             args.Add($"-ac:a:{outputAudioIndex}");
-            args.Add(channels.ToString(CultureInfo.InvariantCulture));
+            args.Add(outputChannels.ToString(CultureInfo.InvariantCulture));
             args.Add($"-filter:a:{outputAudioIndex}");
             args.Add($"\"{volumeFilter}\"");
 
@@ -351,7 +354,7 @@ public class AudioTrackFilterer
             "eac3" => ("eac3", isSurround ? "640k" : "256k"),
             "dts" when profile is "DTS-HD MA" or "DTS-HD HRA" =>
                 ("ac3", isSurround ? "640k" : "256k"),
-            "dts" => ("dca", isSurround ? "640k" : "256k"),
+            "dts" => ("ac3", isSurround ? "640k" : "256k"),
             "truehd" => ("ac3", isSurround ? "640k" : "256k"),
             "flac" => ("flac", "0"),
             "aac" => ("aac", isSurround ? "640k" : "256k"),
