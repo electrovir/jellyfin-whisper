@@ -52,7 +52,9 @@ public class AudioTrackFilterer
             return;
         }
 
-        var streams = await ProbeAudioStreamsAsync(mediaPath, cancellationToken).ConfigureAwait(false);
+        var probeOutput = await ProbeAudioStreamsAsync(mediaPath, cancellationToken).ConfigureAwait(false);
+        var streams = probeOutput.Streams;
+        var formatName = probeOutput.FormatName;
         var englishStreams = streams
             .Where(s => IsEnglishTrack(s))
             .ToList();
@@ -71,20 +73,23 @@ public class AudioTrackFilterer
         if (existingFilteredStreams.Count > 0)
         {
             WhisperFileLogger.Info($"Removing {existingFilteredStreams.Count} existing filtered track(s) from: {mediaPath}");
-            await RemoveFilteredTracksAsync(mediaPath, streams, existingFilteredStreams, cancellationToken)
+            await RemoveFilteredTracksAsync(mediaPath, streams, existingFilteredStreams, formatName, whisperDir, cancellationToken)
                 .ConfigureAwait(false);
 
             // Re-probe after removal to get updated stream indices.
-            streams = await ProbeAudioStreamsAsync(mediaPath, cancellationToken).ConfigureAwait(false);
+            probeOutput = await ProbeAudioStreamsAsync(mediaPath, cancellationToken).ConfigureAwait(false);
+            streams = probeOutput.Streams;
+            formatName = probeOutput.FormatName;
             englishStreams = streams.Where(s => IsEnglishTrack(s)).ToList();
         }
 
         var volumeFilter = BuildVolumeFilter(muteRegions);
-        var tempPath = mediaPath + ".filtering.mkv";
+        var whisperDir = Path.GetDirectoryName(edlPath)!;
+        var tempPath = Path.Combine(whisperDir, "filtering.tmp");
 
         try
         {
-            var args = BuildFfmpegArgs(mediaPath, tempPath, streams, englishStreams, volumeFilter);
+            var args = BuildFfmpegArgs(mediaPath, tempPath, streams, englishStreams, volumeFilter, formatName);
             WhisperFileLogger.Info($"Adding {englishStreams.Count} filtered audio track(s) to: {mediaPath}");
 
             var exitCode = await RunProcessAsync(_ffmpegPath, args, "ffmpeg-filter", cancellationToken)
@@ -121,9 +126,11 @@ public class AudioTrackFilterer
         string mediaPath,
         List<AudioStreamInfo> allStreams,
         List<AudioStreamInfo> filteredStreams,
+        string formatName,
+        string whisperDir,
         CancellationToken cancellationToken)
     {
-        var tempPath = mediaPath + ".removing.mkv";
+        var tempPath = Path.Combine(whisperDir, "removing.tmp");
         var filteredIndices = new HashSet<int>(filteredStreams.Select(s => s.Index));
 
         // Build ffmpeg args that map all streams EXCEPT the filtered ones.
@@ -146,6 +153,8 @@ public class AudioTrackFilterer
 
         args.Add("-c");
         args.Add("copy");
+        args.Add("-f");
+        args.Add(formatName);
         args.Add("-y");
         args.Add($"\"{tempPath}\"");
 
@@ -220,7 +229,8 @@ public class AudioTrackFilterer
         string outputPath,
         List<AudioStreamInfo> allStreams,
         List<AudioStreamInfo> englishStreams,
-        string volumeFilter)
+        string volumeFilter,
+        string formatName)
     {
         // Strategy:
         // -map 0 copies all existing streams (video, audio, subtitles, etc.)
@@ -288,6 +298,8 @@ public class AudioTrackFilterer
             args.Add("0");
         }
 
+        args.Add("-f");
+        args.Add(formatName);
         args.Add("-y");
         args.Add($"\"{outputPath}\"");
 
@@ -300,7 +312,7 @@ public class AudioTrackFilterer
         return lang == "eng" || lang == "en" || lang == "english" || lang == string.Empty;
     }
 
-    private async Task<List<AudioStreamInfo>> ProbeAudioStreamsAsync(
+    private async Task<ProbeOutput> ProbeAudioStreamsAsync(
         string mediaPath,
         CancellationToken cancellationToken)
     {
@@ -316,7 +328,7 @@ public class AudioTrackFilterer
             ffprobePath = _ffmpegPath.Replace("ffmpeg", "ffprobe");
         }
 
-        var args = $"-v quiet -print_format json -show_streams -select_streams a \"{mediaPath}\"";
+        var args = $"-v quiet -print_format json -show_format -show_streams -select_streams a \"{mediaPath}\"";
 
         using var process = new Process
         {
@@ -348,12 +360,8 @@ public class AudioTrackFilterer
         }
 
         var probeResult = JsonSerializer.Deserialize<FfprobeResult>(stdout);
-        if (probeResult?.Streams == null)
-        {
-            return new List<AudioStreamInfo>();
-        }
 
-        return probeResult.Streams
+        var audioStreams = (probeResult?.Streams ?? new List<FfprobeStream>())
             .Select(s => new AudioStreamInfo
             {
                 Index = s.Index,
@@ -363,6 +371,15 @@ public class AudioTrackFilterer
                 CodecName = s.CodecName ?? string.Empty,
             })
             .ToList();
+
+        // Get the container format name (e.g., "matroska,webm" -> "matroska").
+        var formatName = probeResult?.Format?.FormatName ?? "matroska";
+        if (formatName.Contains(','))
+        {
+            formatName = formatName.Split(',')[0];
+        }
+
+        return new ProbeOutput(audioStreams, formatName);
     }
 
     private async Task<int> RunProcessAsync(
@@ -420,6 +437,8 @@ public class AudioTrackFilterer
 
     private sealed record MuteRegion(double Start, double End);
 
+    private sealed record ProbeOutput(List<AudioStreamInfo> Streams, string FormatName);
+
     private sealed class AudioStreamInfo
     {
         public int Index { get; set; }
@@ -439,6 +458,15 @@ public class AudioTrackFilterer
     {
         [JsonPropertyName("streams")]
         public List<FfprobeStream>? Streams { get; set; }
+
+        [JsonPropertyName("format")]
+        public FfprobeFormat? Format { get; set; }
+    }
+
+    private sealed class FfprobeFormat
+    {
+        [JsonPropertyName("format_name")]
+        public string? FormatName { get; set; }
     }
 
     private sealed class FfprobeStream
