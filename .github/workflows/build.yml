@@ -23,9 +23,9 @@ jobs:
       - name: Build
         run: dotnet build --configuration Release --no-restore
 
-      - name: Get short SHA
-        id: sha
-        run: echo "short=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Get timestamp
+        id: timestamp
+        run: echo "ms=$(date +%s%3N)" >> "$GITHUB_OUTPUT"
 
       - name: Fetch all tags
         run: git fetch --tags
@@ -49,8 +49,8 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ steps.sha.outputs.short }}
-          name: ${{ steps.sha.outputs.short }}
+          tag_name: build-${{ steps.timestamp.outputs.ms }}
+          name: ${{ steps.timestamp.outputs.ms }}
           body: |
             ## Changes since last release
 
