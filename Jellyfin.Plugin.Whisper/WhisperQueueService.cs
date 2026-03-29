@@ -116,7 +116,8 @@ public class WhisperQueueService : IHostedService, IDisposable
 
         if (_consumerTask != null)
         {
-            await _consumerTask.ConfigureAwait(false);
+            // Wait up to 10 seconds for the consumer to finish; don't block shutdown.
+            await Task.WhenAny(_consumerTask, Task.Delay(TimeSpan.FromSeconds(10), cancellationToken)).ConfigureAwait(false);
         }
 
         _logger.LogInformation("Whisper queue service stopped.");

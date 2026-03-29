@@ -54,6 +54,7 @@ public class WhisperProcessor
         Directory.CreateDirectory(outputDir);
 
         var wavPath = Path.Combine(outputDir, "audio.wav");
+        var succeeded = false;
 
         try
         {
@@ -83,6 +84,7 @@ public class WhisperProcessor
                 $"Completed at {DateTime.UtcNow:O}",
                 cancellationToken).ConfigureAwait(false);
 
+            succeeded = true;
             _logger.LogInformation("Whisper processing complete for: {MediaPath}", mediaPath);
         }
         finally
@@ -97,6 +99,20 @@ public class WhisperProcessor
                 catch (IOException ex)
                 {
                     _logger.LogWarning(ex, "Failed to clean up temp WAV: {WavPath}", wavPath);
+                }
+            }
+
+            // Remove the .whisper directory if processing failed so it doesn't
+            // litter the media folder with empty directories.
+            if (!succeeded && Directory.Exists(outputDir))
+            {
+                try
+                {
+                    Directory.Delete(outputDir, recursive: true);
+                }
+                catch (IOException ex)
+                {
+                    _logger.LogWarning(ex, "Failed to clean up failed whisper dir: {Path}", outputDir);
                 }
             }
         }
@@ -162,6 +178,19 @@ public class WhisperProcessor
         };
 
         process.Start();
+
+        // Kill the process if cancellation is requested (e.g. server shutdown).
+        using var registration = cancellationToken.Register(() =>
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                // Process may have already exited.
+            }
+        });
 
         // Read stdout/stderr asynchronously to prevent buffer deadlocks.
         var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
