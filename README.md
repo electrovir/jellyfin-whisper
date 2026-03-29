@@ -55,10 +55,12 @@ brew install ffmpeg
 ## Installation
 
 1. Download `Jellyfin.Plugin.Whisper.dll` from the [latest release](../../releases/latest).
-2. Copy it into your Jellyfin plugins directory:
-   - **macOS**: `~/.local/share/jellyfin/plugins/Whisper/`
-   - **Linux**: `/var/lib/jellyfin/plugins/Whisper/`
-   - **Docker**: Mount or copy into `/config/plugins/Whisper/` inside the container.
+2. Copy it into a `Whisper/` folder inside your Jellyfin plugins directory:
+   - **Linux**: `~/.local/share/jellyfin/plugins/Whisper/` (or `/var/lib/jellyfin/plugins/Whisper/` for package installs)
+   - **macOS**: `~/Library/Application Support/jellyfin/plugins/Whisper/`
+   - **Windows**: `%LocalAppData%\jellyfin\plugins\Whisper\` (or `%ProgramData%\Jellyfin\Server\plugins\Whisper\` for tray installs)
+
+   See the [Jellyfin plugin docs](https://jellyfin.org/docs/general/server/plugins/) and [configuration docs](https://jellyfin.org/docs/general/administration/configuration/) for details on data directory paths, which can be overridden with `--datadir` or the `JELLYFIN_DATA_DIR` environment variable.
 3. Restart Jellyfin.
 
 ## Configuration

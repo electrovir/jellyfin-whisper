@@ -114,18 +114,21 @@
             pluginUniqueId: 'a4c5f23e-8b1d-4f6a-9c3e-7d2b8e1f0a5c'
         };
 
-        document.querySelector('#WhisperConfigPage')
-            .addEventListener('pageshow', function () {
-                Dashboard.showLoadingMsg();
-                ApiClient.getPluginConfiguration(WhisperConfig.pluginUniqueId).then(function (config) {
-                    document.querySelector('#WhisperCppPath').value = config.WhisperCppPath || '';
-                    document.querySelector('#FfmpegPath').value = config.FfmpegPath || '';
-                    document.querySelector('#WhisperModel').value = config.WhisperModel || '';
-                    document.querySelector('#MuteWords').value = config.MuteWords || '';
-                    document.querySelector('#EdlBufferMs').value = config.EdlBufferMs || 150;
-                    Dashboard.hideLoadingMsg();
-                });
+        function loadConfig() {
+            Dashboard.showLoadingMsg();
+            ApiClient.getPluginConfiguration(WhisperConfig.pluginUniqueId).then(function (config) {
+                document.querySelector('#WhisperCppPath').value = config.WhisperCppPath || '';
+                document.querySelector('#FfmpegPath').value = config.FfmpegPath || '';
+                document.querySelector('#WhisperModel').value = config.WhisperModel || '';
+                document.querySelector('#MuteWords').value = config.MuteWords || '';
+                document.querySelector('#EdlBufferMs').value = config.EdlBufferMs || 150;
+                Dashboard.hideLoadingMsg();
             });
+        }
+
+        var page = document.querySelector('#WhisperConfigPage');
+        page.addEventListener('viewshow', loadConfig);
+        page.addEventListener('pageshow', loadConfig);
 
         document.querySelector('#WhisperConfigForm')
             .addEventListener('submit', function (e) {
