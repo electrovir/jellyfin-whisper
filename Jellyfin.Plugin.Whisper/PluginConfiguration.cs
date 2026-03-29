@@ -20,10 +20,11 @@ public class PluginConfiguration : BasePluginConfiguration
     public string FfmpegPath { get; set; } = "ffmpeg";
 
     /// <summary>
-    /// Gets or sets the whisper model to use.
-    /// Passed directly to whisper-cpp's --model flag.
+    /// Gets or sets the full file path to a downloaded whisper model (.bin file).
+    /// Passed directly to whisper-cli's --model flag.
+    /// Must be set before the plugin can process media.
     /// </summary>
-    public string WhisperModel { get; set; } = "medium";
+    public string WhisperModel { get; set; } = string.Empty;
 
     /// <summary>
     /// Gets or sets the list of words or phrases to mute via EDL files.

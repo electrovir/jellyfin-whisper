@@ -39,10 +39,16 @@ whisper-cli --help
 
 Or build from source: https://github.com/ggml-org/whisper.cpp#building
 
-You also need a whisper model file. The plugin defaults to `medium`, but you can use any model supported by whisper.cpp (`tiny`, `base`, `small`, `medium`, `large`). Download models from:
+You also need a whisper model file. The `--model` flag requires a **full file path** to a downloaded `.bin` model, not just a name like "medium". Download a model:
 
-- https://huggingface.co/ggerganov/whisper.cpp/tree/main
-- https://ggml.ggerganov.com/
+```sh
+# Download the medium model (~1.5 GB)
+curl -L -o ~/ggml-medium.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin
+```
+
+Then set the "Whisper Model" field in the plugin config to the full path (e.g. `/Users/media/ggml-medium.bin`).
+
+Available models (trade-off between speed and accuracy): `ggml-tiny.bin`, `ggml-base.bin`, `ggml-small.bin`, `ggml-medium.bin`, `ggml-large.bin`. Browse all models at https://huggingface.co/ggerganov/whisper.cpp/tree/main
 
 ### ffmpeg
 
@@ -73,7 +79,7 @@ Open **Dashboard > Plugins > Whisper Transcription** in the Jellyfin web UI.
 |---|---|---|
 | **whisper-cpp Binary Path** | `/opt/homebrew/bin/whisper-cli` | Full path to the whisper-cli binary. See [Finding binary paths](#finding-binary-paths) below. |
 | **ffmpeg Binary Path** | `ffmpeg` | Path to ffmpeg. Usually already available in Jellyfin. |
-| **Whisper Model** | `medium` | Model name or path passed to `--model`. Larger models are more accurate but slower. |
+| **Whisper Model** | *(empty - must be set)* | Full file path to a downloaded `.bin` model file (e.g. `/Users/media/ggml-medium.bin`). See [Prerequisites](#whisper-cpp). |
 | **Mute Words / Phrases** | Common profanity list | One word or phrase per line. Case-insensitive. Punctuation is stripped when matching. Multi-word phrases match against consecutive whisper tokens. |
 | **EDL Buffer (ms)** | `150` | Milliseconds of buffer added before and after each muted word to ensure full coverage. |
 
