@@ -52,6 +52,7 @@ public class AudioTrackFilterer
             return;
         }
 
+        var whisperDir = Path.GetDirectoryName(edlPath)!;
         var probeOutput = await ProbeAudioStreamsAsync(mediaPath, cancellationToken).ConfigureAwait(false);
         var streams = probeOutput.Streams;
         var formatName = probeOutput.FormatName;
@@ -84,7 +85,6 @@ public class AudioTrackFilterer
         }
 
         var volumeFilter = BuildVolumeFilter(muteRegions);
-        var whisperDir = Path.GetDirectoryName(edlPath)!;
         var tempPath = Path.Combine(whisperDir, "filtering.tmp");
 
         try
