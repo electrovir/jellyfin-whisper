@@ -80,7 +80,7 @@ public class AudioTrackFilterer
         }
 
         var volumeFilter = BuildVolumeFilter(muteRegions);
-        var tempPath = mediaPath + ".filtering.tmp";
+        var tempPath = mediaPath + ".filtering.mkv";
 
         try
         {
@@ -123,7 +123,7 @@ public class AudioTrackFilterer
         List<AudioStreamInfo> filteredStreams,
         CancellationToken cancellationToken)
     {
-        var tempPath = mediaPath + ".removing.tmp";
+        var tempPath = mediaPath + ".removing.mkv";
         var filteredIndices = new HashSet<int>(filteredStreams.Select(s => s.Index));
 
         // Build ffmpeg args that map all streams EXCEPT the filtered ones.
