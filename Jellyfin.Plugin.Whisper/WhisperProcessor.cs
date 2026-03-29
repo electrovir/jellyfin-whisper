@@ -27,6 +27,35 @@ public class WhisperProcessor
         _logger = logger;
     }
 
+    private const string SkipMarker = ".no-whisper-filter";
+
+    /// <summary>
+    /// Returns true if a .no-whisper-filter file exists next to the media file
+    /// or in any ancestor directory.
+    /// </summary>
+    public static bool IsExcluded(string mediaPath)
+    {
+        var dir = Path.GetDirectoryName(mediaPath);
+
+        while (!string.IsNullOrEmpty(dir))
+        {
+            if (File.Exists(Path.Combine(dir, SkipMarker)))
+            {
+                return true;
+            }
+
+            var parent = Path.GetDirectoryName(dir);
+            if (parent == dir)
+            {
+                break;
+            }
+
+            dir = parent;
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Returns true if the whisper output directory exists and processing completed successfully.
     /// </summary>

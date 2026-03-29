@@ -50,7 +50,7 @@ You also need a whisper model file. The `--model` flag requires a **full file pa
 curl -L -o ~/ggml-medium.bin https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium.bin
 ```
 
-Then set the "Whisper Model" field in the plugin config to the full path (e.g. `/Users/media/ggml-medium.bin`).
+Then set the "Whisper Model" field in the plugin config to the full path (e.g. `~/ggml-medium.bin`).
 
 Available models (trade-off between speed and accuracy): `ggml-tiny.bin`, `ggml-base.bin`, `ggml-small.bin`, `ggml-medium.bin`, `ggml-large.bin`. Browse all models at https://huggingface.co/ggerganov/whisper.cpp/tree/main
 
@@ -83,7 +83,7 @@ Open **Dashboard > Plugins > Whisper Transcription** in the Jellyfin web UI.
 |---|---|---|
 | **whisper-cpp Binary Path** | `/opt/homebrew/bin/whisper-cli` | Full path to the whisper-cli binary. See [Finding binary paths](#finding-binary-paths) below. |
 | **ffmpeg Binary Path** | `ffmpeg` | Path to ffmpeg. Usually already available in Jellyfin. |
-| **Whisper Model** | *(empty - must be set)* | Full file path to a downloaded `.bin` model file (e.g. `/Users/media/ggml-medium.bin`). See [Prerequisites](#whisper-cpp). |
+| **Whisper Model** | *(empty - must be set)* | Full file path to a downloaded `.bin` model file (e.g. `~/ggml-medium.bin`). See [Prerequisites](#whisper-cpp). |
 | **Mute Words / Phrases** | Common profanity list | One word or phrase per line. Case-insensitive. Punctuation is stripped when matching. Multi-word phrases match against consecutive whisper tokens. |
 | **EDL Buffer (ms)** | `150` | Milliseconds of buffer added before and after each muted word to ensure full coverage. |
 
@@ -109,6 +109,22 @@ ls $(brew --prefix whisper-cpp)/bin/
 
 - **Regenerate All EDL Files** -- Re-creates EDL files from existing transcription JSON using the current word list. Also clears `.edl-applied` markers so filtered audio tracks will be re-created with the updated word list on the next processing run.
 - **Reset All Transcriptions** -- Wipes `.complete` markers so all media will be re-transcribed on the next run.
+
+## Excluding Files and Folders
+
+To skip processing for specific media, create an empty file named `.no-whisper-filter` next to the media file or in any parent folder. The plugin checks all ancestor directories, so a single marker can exclude an entire folder tree.
+
+```sh
+# Exclude a single folder and everything inside it
+touch "/path/to/movies/some-folder/.no-whisper-filter"
+
+# Exclude an entire library
+touch "/path/to/media-library/.no-whisper-filter"
+```
+
+Excluded files are silently skipped. The whisper.log will show `Skipped (excluded by .no-whisper-filter)` for any excluded file that was queued.
+
+To re-enable processing, just delete the `.no-whisper-filter` file.
 
 ## How Processing Works
 

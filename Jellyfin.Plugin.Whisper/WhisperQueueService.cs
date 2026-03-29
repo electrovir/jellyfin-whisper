@@ -51,6 +51,11 @@ public class WhisperQueueService : IHostedService, IDisposable
     /// </summary>
     public bool TryEnqueue(string mediaPath, bool force = false)
     {
+        if (WhisperProcessor.IsExcluded(mediaPath))
+        {
+            return false;
+        }
+
         if (!force)
         {
             var whisperDir = WhisperProcessor.GetWhisperDirectory(mediaPath);
@@ -216,6 +221,14 @@ public class WhisperQueueService : IHostedService, IDisposable
                     {
                         _logger.LogError("WhisperPlugin.Instance is null, cannot process media.");
                         break;
+                    }
+
+                    // Re-check exclusion at processing time in case marker was added after enqueueing.
+                    if (WhisperProcessor.IsExcluded(entry.MediaPath))
+                    {
+                        _logger.LogInformation("Skipped (excluded by .no-whisper-filter): {Path}", entry.MediaPath);
+                        WhisperFileLogger.Info($"Skipped (excluded by .no-whisper-filter): {entry.MediaPath}");
+                        continue;
                     }
 
                     var config = plugin.Configuration;
