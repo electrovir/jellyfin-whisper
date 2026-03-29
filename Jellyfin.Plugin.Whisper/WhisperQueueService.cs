@@ -31,6 +31,8 @@ public class WhisperQueueService : IHostedService, IDisposable
     /// </summary>
     private readonly ConcurrentDictionary<string, byte> _pending = new(StringComparer.Ordinal);
 
+    private const int MaxConsecutiveFailures = 5;
+
     private CancellationTokenSource? _cts;
     private Task? _consumerTask;
 
@@ -172,6 +174,8 @@ public class WhisperQueueService : IHostedService, IDisposable
 
     private async Task ConsumeAsync(CancellationToken cancellationToken)
     {
+        var consecutiveFailures = 0;
+
         try
         {
             await foreach (var entry in _channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
@@ -184,6 +188,7 @@ public class WhisperQueueService : IHostedService, IDisposable
 
                     _logger.LogInformation("Processing: {Path}", entry.MediaPath);
                     await processor.ProcessAsync(entry.MediaPath, whisperDir, cancellationToken).ConfigureAwait(false);
+                    consecutiveFailures = 0;
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -192,6 +197,15 @@ public class WhisperQueueService : IHostedService, IDisposable
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to process: {Path}", entry.MediaPath);
+                    consecutiveFailures++;
+
+                    if (consecutiveFailures >= MaxConsecutiveFailures)
+                    {
+                        _logger.LogError(
+                            "Whisper queue halted after {Count} consecutive failures. Fix the issue (check binary paths in plugin config) and restart Jellyfin or run the scheduled task to retry.",
+                            consecutiveFailures);
+                        break;
+                    }
                 }
                 finally
                 {

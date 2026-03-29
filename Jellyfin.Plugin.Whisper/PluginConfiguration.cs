@@ -9,9 +9,9 @@ public class PluginConfiguration : BasePluginConfiguration
 {
     /// <summary>
     /// Gets or sets the path to the whisper-cli binary.
-    /// Defaults to "whisper-cli" (assumes it is on PATH via homebrew).
+    /// Defaults to the standard Homebrew location on Apple Silicon Macs.
     /// </summary>
-    public string WhisperCppPath { get; set; } = "whisper-cli";
+    public string WhisperCppPath { get; set; } = "/opt/homebrew/bin/whisper-cli";
 
     /// <summary>
     /// Gets or sets the path to the ffmpeg binary used for audio extraction.

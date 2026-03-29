@@ -71,11 +71,29 @@ Open **Dashboard > Plugins > Whisper Transcription** in the Jellyfin web UI.
 
 | Setting | Default | Description |
 |---|---|---|
-| **whisper-cpp Binary Path** | `whisper-cli` | Path to the whisper-cli binary. If installed via Homebrew it should be on PATH already. |
+| **whisper-cpp Binary Path** | `/opt/homebrew/bin/whisper-cli` | Full path to the whisper-cli binary. See [Finding binary paths](#finding-binary-paths) below. |
 | **ffmpeg Binary Path** | `ffmpeg` | Path to ffmpeg. Usually already available in Jellyfin. |
 | **Whisper Model** | `medium` | Model name or path passed to `--model`. Larger models are more accurate but slower. |
 | **Mute Words / Phrases** | Common profanity list | One word or phrase per line. Case-insensitive. Punctuation is stripped when matching. Multi-word phrases match against consecutive whisper tokens. |
 | **EDL Buffer (ms)** | `150` | Milliseconds of buffer added before and after each muted word to ensure full coverage. |
+
+### Finding binary paths
+
+Jellyfin runs as a system process, not through your shell, so it does **not** have access to your shell's `PATH` (e.g. from `.zshrc`). You must provide full absolute paths to binaries.
+
+To find where Homebrew installed whisper-cli:
+
+```sh
+which whisper-cli
+```
+
+This will output something like `/opt/homebrew/bin/whisper-cli` (Apple Silicon) or `/usr/local/bin/whisper-cli` (Intel Mac). Paste that full path into the plugin config.
+
+If `which` finds nothing, try:
+
+```sh
+ls $(brew --prefix whisper-cpp)/bin/
+```
 
 ### Actions
 
