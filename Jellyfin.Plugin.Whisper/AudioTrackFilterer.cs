@@ -266,36 +266,51 @@ public class AudioTrackFilterer
             var outputAudioIndex = originalAudioCount + i;
             var stream = englishStreams[i];
             var channels = stream.Channels > 0 ? stream.Channels : 2;
-            var bitrate = channels <= 2 ? "256k" : "640k";
+
+            // Try to match the original codec; fall back to ac3 for surround or aac for stereo.
+            var (encoderCodec, encoderBitrate) = GetEncoderForCodec(stream.CodecName, stream.Profile, channels);
 
             args.Add($"-c:a:{outputAudioIndex}");
-            args.Add("aac");
+            args.Add(encoderCodec);
             args.Add($"-b:a:{outputAudioIndex}");
-            args.Add(bitrate);
+            args.Add(encoderBitrate);
             args.Add($"-ac:a:{outputAudioIndex}");
             args.Add(channels.ToString(CultureInfo.InvariantCulture));
             args.Add($"-filter:a:{outputAudioIndex}");
             args.Add($"\"{volumeFilter}\"");
 
-            // Set the track title.
+            // Use the original track title.
             var originalTitle = string.IsNullOrWhiteSpace(stream.Title)
                 ? $"Track {stream.Index}"
                 : stream.Title;
+            var sourceCodecLabel = GetSourceCodecLabel(stream.CodecName, stream.Profile);
             args.Add($"-metadata:s:a:{outputAudioIndex}");
-            args.Add($"title=\"{FilteredTrackPrefix}{originalTitle}\"");
+            args.Add($"title=\"{FilteredTrackPrefix}{originalTitle} [{sourceCodecLabel}]\"");
             args.Add($"-metadata:s:a:{outputAudioIndex}");
             args.Add("language=eng");
 
-            // Set the filtered track as default, unset default on the original.
-            args.Add($"-disposition:a:{outputAudioIndex}");
-            args.Add("default");
+            // Only set the filtered copy of the original default track as default.
+            if (stream.IsDefault)
+            {
+                args.Add($"-disposition:a:{outputAudioIndex}");
+                args.Add("default");
+            }
+            else
+            {
+                args.Add($"-disposition:a:{outputAudioIndex}");
+                args.Add("0");
+            }
         }
 
-        // Unset default disposition on original audio tracks.
+        // Unset default on original audio tracks that have a filtered copy.
+        var filteredIndices = new HashSet<int>(englishStreams.Select(s => s.Index));
         for (var i = 0; i < originalAudioCount; i++)
         {
-            args.Add($"-disposition:a:{i}");
-            args.Add("0");
+            if (filteredIndices.Contains(allStreams[i].Index))
+            {
+                args.Add($"-disposition:a:{i}");
+                args.Add("0");
+            }
         }
 
         args.Add("-f");
@@ -304,6 +319,45 @@ public class AudioTrackFilterer
         args.Add($"\"{outputPath}\"");
 
         return string.Join(" ", args);
+    }
+
+    private static string GetSourceCodecLabel(string codecName, string profile)
+    {
+        return codecName.ToLowerInvariant() switch
+        {
+            "ac3" => "Dolby Digital",
+            "eac3" => "Dolby Digital Plus",
+            "truehd" => "TrueHD",
+            "dts" => profile switch
+            {
+                "DTS-HD MA" => "DTS-HD MA",
+                "DTS-HD HRA" => "DTS-HD HRA",
+                _ => "DTS",
+            },
+            "aac" => "AAC",
+            "flac" => "FLAC",
+            "pcm_s16le" or "pcm_s24le" or "pcm_s32le" => "PCM",
+            _ => codecName.ToUpperInvariant(),
+        };
+    }
+
+    private static (string Codec, string Bitrate) GetEncoderForCodec(string codecName, string profile, int channels)
+    {
+        var isSurround = channels > 2;
+
+        return codecName.ToLowerInvariant() switch
+        {
+            "ac3" => ("ac3", isSurround ? "640k" : "256k"),
+            "eac3" => ("eac3", isSurround ? "640k" : "256k"),
+            "dts" when profile is "DTS-HD MA" or "DTS-HD HRA" =>
+                ("ac3", isSurround ? "640k" : "256k"),
+            "dts" => ("dca", isSurround ? "640k" : "256k"),
+            "truehd" => ("ac3", isSurround ? "640k" : "256k"),
+            "flac" => ("flac", "0"),
+            "aac" => ("aac", isSurround ? "640k" : "256k"),
+            "pcm_s16le" or "pcm_s24le" or "pcm_s32le" => ("flac", "0"),
+            _ => ("aac", isSurround ? "640k" : "256k"),
+        };
     }
 
     private static bool IsEnglishTrack(AudioStreamInfo stream)
@@ -369,6 +423,8 @@ public class AudioTrackFilterer
                 Title = s.Tags?.Title ?? string.Empty,
                 Channels = s.Channels,
                 CodecName = s.CodecName ?? string.Empty,
+                Profile = s.Profile ?? string.Empty,
+                IsDefault = s.Disposition?.Default == 1,
             })
             .ToList();
 
@@ -450,6 +506,10 @@ public class AudioTrackFilterer
         public int Channels { get; set; }
 
         public string CodecName { get; set; } = string.Empty;
+
+        public string Profile { get; set; } = string.Empty;
+
+        public bool IsDefault { get; set; }
     }
 
     // --- ffprobe JSON models ---
@@ -480,8 +540,20 @@ public class AudioTrackFilterer
         [JsonPropertyName("channels")]
         public int Channels { get; set; }
 
+        [JsonPropertyName("profile")]
+        public string? Profile { get; set; }
+
+        [JsonPropertyName("disposition")]
+        public FfprobeDisposition? Disposition { get; set; }
+
         [JsonPropertyName("tags")]
         public FfprobeTags? Tags { get; set; }
+    }
+
+    private sealed class FfprobeDisposition
+    {
+        [JsonPropertyName("default")]
+        public int Default { get; set; }
     }
 
     private sealed class FfprobeTags

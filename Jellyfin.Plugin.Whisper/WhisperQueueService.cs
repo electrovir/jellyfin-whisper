@@ -166,6 +166,28 @@ public class WhisperQueueService : IHostedService, IDisposable
         WhisperFileLogger.Info($"Library scan complete: queued {queued} unprocessed item(s).");
     }
 
+    private void RefreshLibraryItem(string mediaPath)
+    {
+        try
+        {
+            var items = _libraryManager.GetItemList(new InternalItemsQuery
+            {
+                Path = mediaPath,
+                Recursive = false,
+            });
+
+            foreach (var item in items)
+            {
+                _libraryManager.UpdateItemAsync(item, item.GetParent(), ItemUpdateType.MetadataEdit, CancellationToken.None);
+                WhisperFileLogger.Info($"Notified Jellyfin of file change: {mediaPath}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to refresh library item: {Path}", mediaPath);
+        }
+    }
+
     private void OnItemAdded(object? sender, ItemChangeEventArgs e)
     {
         if (e.Item is not Video || string.IsNullOrEmpty(e.Item.Path))
@@ -207,6 +229,7 @@ public class WhisperQueueService : IHostedService, IDisposable
                         await processor.ApplyEdlFilteringAsync(entry.MediaPath, whisperDir, cancellationToken).ConfigureAwait(false);
                         consecutiveFailures = 0;
                         WhisperFileLogger.Info($"Re-filtering complete: {entry.MediaPath}");
+                        RefreshLibraryItem(entry.MediaPath);
                     }
                     else
                     {
@@ -217,6 +240,7 @@ public class WhisperQueueService : IHostedService, IDisposable
                         await processor.ProcessAsync(entry.MediaPath, whisperDir, cancellationToken).ConfigureAwait(false);
                         consecutiveFailures = 0;
                         WhisperFileLogger.Info($"Complete: {entry.MediaPath}");
+                        RefreshLibraryItem(entry.MediaPath);
                     }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
