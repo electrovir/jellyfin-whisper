@@ -183,11 +183,25 @@ public class WhisperQueueService : IHostedService, IDisposable
             {
                 try
                 {
-                    var config = WhisperPlugin.Instance?.Configuration ?? new PluginConfiguration();
+                    var plugin = WhisperPlugin.Instance;
+                    if (plugin == null)
+                    {
+                        _logger.LogError("WhisperPlugin.Instance is null, cannot process media.");
+                        break;
+                    }
+
+                    // Force Jellyfin to re-read config from disk.
+                    plugin.UpdateConfiguration(plugin.Configuration);
+
+                    var config = plugin.Configuration;
                     var processor = new WhisperProcessor(config, _logger);
                     var whisperDir = WhisperProcessor.GetWhisperDirectory(entry.MediaPath);
 
-                    _logger.LogInformation("Processing: {Path}", entry.MediaPath);
+                    _logger.LogInformation(
+                        "Processing: {Path} (whisper-cli: {WhisperPath}, model: {Model})",
+                        entry.MediaPath,
+                        config.WhisperCppPath,
+                        config.WhisperModel);
                     await processor.ProcessAsync(entry.MediaPath, whisperDir, cancellationToken).ConfigureAwait(false);
                     consecutiveFailures = 0;
                 }
