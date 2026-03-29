@@ -103,6 +103,7 @@ public class WhisperQueueService : IHostedService, IDisposable
         _ = Task.Run(() => EnqueueUnprocessedItems(), CancellationToken.None);
 
         _logger.LogInformation("Whisper queue service started.");
+        WhisperFileLogger.Info($"Whisper queue service started. Log file: {WhisperFileLogger.LogPath}");
         return Task.CompletedTask;
     }
 
@@ -158,6 +159,7 @@ public class WhisperQueueService : IHostedService, IDisposable
         }
 
         _logger.LogInformation("Library scan complete: queued {Count} unprocessed item(s).", queued);
+        WhisperFileLogger.Info($"Library scan complete: queued {queued} unprocessed item(s).");
     }
 
     private void OnItemAdded(object? sender, ItemChangeEventArgs e)
@@ -190,20 +192,17 @@ public class WhisperQueueService : IHostedService, IDisposable
                         break;
                     }
 
-                    // Force Jellyfin to re-read config from disk.
-                    plugin.UpdateConfiguration(plugin.Configuration);
-
                     var config = plugin.Configuration;
                     var processor = new WhisperProcessor(config, _logger);
                     var whisperDir = WhisperProcessor.GetWhisperDirectory(entry.MediaPath);
 
-                    _logger.LogInformation(
-                        "Processing: {Path} (whisper-cli: {WhisperPath}, model: {Model})",
-                        entry.MediaPath,
-                        config.WhisperCppPath,
-                        config.WhisperModel);
+                    var logMsg = $"Processing: {entry.MediaPath} (whisper-cli: {config.WhisperCppPath}, model: {config.WhisperModel})";
+                    _logger.LogInformation("{Message}", logMsg);
+                    WhisperFileLogger.Info(logMsg);
+
                     await processor.ProcessAsync(entry.MediaPath, whisperDir, cancellationToken).ConfigureAwait(false);
                     consecutiveFailures = 0;
+                    WhisperFileLogger.Info($"Complete: {entry.MediaPath}");
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
@@ -212,6 +211,7 @@ public class WhisperQueueService : IHostedService, IDisposable
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to process: {Path}", entry.MediaPath);
+                    WhisperFileLogger.Error($"Failed to process: {entry.MediaPath} - {ex.Message}");
                     consecutiveFailures++;
 
                     if (consecutiveFailures >= MaxConsecutiveFailures)

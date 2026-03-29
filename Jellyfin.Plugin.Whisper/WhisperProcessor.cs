@@ -207,6 +207,7 @@ public class WhisperProcessor
                 processName,
                 process.ExitCode,
                 stderr);
+            WhisperFileLogger.Error($"{processName} failed (exit code {process.ExitCode}). stderr: {stderr}");
         }
 
         return process.ExitCode;
