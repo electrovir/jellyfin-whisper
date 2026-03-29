@@ -129,6 +129,7 @@
         var page = document.querySelector('#WhisperConfigPage');
         page.addEventListener('viewshow', loadConfig);
         page.addEventListener('pageshow', loadConfig);
+        loadConfig();
 
         document.querySelector('#WhisperConfigForm')
             .addEventListener('submit', function (e) {
