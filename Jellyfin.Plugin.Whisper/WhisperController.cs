@@ -63,14 +63,14 @@ public class WhisperController : ControllerBase
             var whisperDir = WhisperProcessor.GetWhisperDirectory(item.Path);
             var markerPath = Path.Combine(whisperDir, ".complete");
 
-            if (!File.Exists(markerPath))
+            if (!System.IO.File.Exists(markerPath))
             {
                 continue;
             }
 
             try
             {
-                File.Delete(markerPath);
+                System.IO.File.Delete(markerPath);
                 wiped++;
             }
             catch (IOException ex)
@@ -122,7 +122,7 @@ public class WhisperController : ControllerBase
             var whisperDir = WhisperProcessor.GetWhisperDirectory(item.Path);
             var transcriptionPath = Path.Combine(whisperDir, "transcription.json");
 
-            if (!File.Exists(transcriptionPath))
+            if (!System.IO.File.Exists(transcriptionPath))
             {
                 continue;
             }
@@ -161,7 +161,7 @@ public class WhisperController : ControllerBase
             return NotFound(new { error = "Item not found." });
         }
 
-        if (string.IsNullOrEmpty(item.Path) || !File.Exists(item.Path))
+        if (string.IsNullOrEmpty(item.Path) || !System.IO.File.Exists(item.Path))
         {
             return BadRequest(new { error = "Item has no accessible file path." });
         }
