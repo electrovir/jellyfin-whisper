@@ -1,0 +1,209 @@
+using System;
+using System.Collections.Concurrent;
+using System.IO;
+using System.Threading;
+using System.Threading.Channels;
+using System.Threading.Tasks;
+using Jellyfin.Data.Enums;
+using MediaBrowser.Controller.Entities;
+using MediaBrowser.Controller.Library;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+
+namespace Jellyfin.Plugin.Whisper;
+
+/// <summary>
+/// Long-running background service that processes media files through whisper.cpp
+/// one at a time. Acts as the single point of entry for all whisper work:
+/// startup scan, library-change events, scheduled task, and API requests.
+/// </summary>
+public class WhisperQueueService : IHostedService, IDisposable
+{
+    private readonly ILibraryManager _libraryManager;
+    private readonly ILogger<WhisperQueueService> _logger;
+
+    private readonly Channel<QueueEntry> _channel = Channel.CreateUnbounded<QueueEntry>(
+        new UnboundedChannelOptions { SingleReader = true });
+
+    /// <summary>
+    /// Tracks paths already sitting in the queue so we don't enqueue duplicates.
+    /// Entries are removed after processing completes (success or failure).
+    /// </summary>
+    private readonly ConcurrentDictionary<string, byte> _pending = new(StringComparer.Ordinal);
+
+    private CancellationTokenSource? _cts;
+    private Task? _consumerTask;
+
+    /// <summary>
+    /// Initializes a new instance of the <see cref="WhisperQueueService"/> class.
+    /// </summary>
+    public WhisperQueueService(ILibraryManager libraryManager, ILogger<WhisperQueueService> logger)
+    {
+        _libraryManager = libraryManager;
+        _logger = logger;
+    }
+
+    /// <summary>
+    /// Enqueues a media file for whisper processing.
+    /// Returns false if the file is already queued or already processed (unless force is true).
+    /// </summary>
+    public bool TryEnqueue(string mediaPath, bool force = false)
+    {
+        if (!force)
+        {
+            var whisperDir = WhisperProcessor.GetWhisperDirectory(mediaPath);
+            if (WhisperProcessor.IsAlreadyProcessed(whisperDir))
+            {
+                return false;
+            }
+        }
+
+        // Deduplicate: only enqueue if not already pending.
+        if (!_pending.TryAdd(mediaPath, 0))
+        {
+            return false;
+        }
+
+        _channel.Writer.TryWrite(new QueueEntry(mediaPath, force));
+        return true;
+    }
+
+    /// <summary>
+    /// Enqueues a media file for reprocessing. Deletes existing output first.
+    /// </summary>
+    public bool EnqueueForReprocessing(string mediaPath)
+    {
+        var whisperDir = WhisperProcessor.GetWhisperDirectory(mediaPath);
+        if (Directory.Exists(whisperDir))
+        {
+            try
+            {
+                Directory.Delete(whisperDir, recursive: true);
+            }
+            catch (IOException ex)
+            {
+                _logger.LogWarning(ex, "Failed to delete existing whisper dir: {Path}", whisperDir);
+            }
+        }
+
+        return TryEnqueue(mediaPath, force: true);
+    }
+
+    /// <inheritdoc />
+    public Task StartAsync(CancellationToken cancellationToken)
+    {
+        _libraryManager.ItemAdded += OnItemAdded;
+
+        _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        _consumerTask = ConsumeAsync(_cts.Token);
+
+        // Scan for unprocessed items on a background thread so StartAsync returns quickly.
+        _ = Task.Run(() => EnqueueUnprocessedItems(), CancellationToken.None);
+
+        _logger.LogInformation("Whisper queue service started.");
+        return Task.CompletedTask;
+    }
+
+    /// <inheritdoc />
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        _libraryManager.ItemAdded -= OnItemAdded;
+
+        _cts?.Cancel();
+        _channel.Writer.TryComplete();
+
+        if (_consumerTask != null)
+        {
+            await _consumerTask.ConfigureAwait(false);
+        }
+
+        _logger.LogInformation("Whisper queue service stopped.");
+    }
+
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        _cts?.Dispose();
+    }
+
+    /// <summary>
+    /// Scans the entire library and enqueues any items that are missing
+    /// a .whisper folder or .complete marker.
+    /// </summary>
+    public void EnqueueUnprocessedItems()
+    {
+        var items = _libraryManager.GetItemList(new InternalItemsQuery
+        {
+            IncludeItemTypes = new[] { BaseItemKind.Movie, BaseItemKind.Episode },
+            IsVirtualItem = false,
+            Recursive = true,
+        });
+
+        var queued = 0;
+
+        foreach (var item in items)
+        {
+            if (string.IsNullOrEmpty(item.Path) || !File.Exists(item.Path))
+            {
+                continue;
+            }
+
+            if (TryEnqueue(item.Path))
+            {
+                queued++;
+            }
+        }
+
+        _logger.LogInformation("Library scan complete: queued {Count} unprocessed item(s).", queued);
+    }
+
+    private void OnItemAdded(object? sender, ItemChangeEventArgs e)
+    {
+        if (e.Item is not Video || string.IsNullOrEmpty(e.Item.Path))
+        {
+            return;
+        }
+
+        if (TryEnqueue(e.Item.Path))
+        {
+            _logger.LogInformation("New media detected, queued for whisper: {Path}", e.Item.Path);
+        }
+    }
+
+    private async Task ConsumeAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            await foreach (var entry in _channel.Reader.ReadAllAsync(cancellationToken).ConfigureAwait(false))
+            {
+                try
+                {
+                    var config = WhisperPlugin.Instance?.Configuration ?? new PluginConfiguration();
+                    var processor = new WhisperProcessor(config, _logger);
+                    var whisperDir = WhisperProcessor.GetWhisperDirectory(entry.MediaPath);
+
+                    _logger.LogInformation("Processing: {Path}", entry.MediaPath);
+                    await processor.ProcessAsync(entry.MediaPath, whisperDir, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to process: {Path}", entry.MediaPath);
+                }
+                finally
+                {
+                    _pending.TryRemove(entry.MediaPath, out _);
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // Expected during shutdown.
+        }
+    }
+
+    private sealed record QueueEntry(string MediaPath, bool Force);
+}

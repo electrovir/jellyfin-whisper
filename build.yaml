@@ -1,0 +1,16 @@
+---
+version: "1.0.0.0"
+targetAbi: "10.10.0.0"
+framework: "net8.0"
+owner: "electrovir"
+overview: "Processes media files with whisper.cpp to generate word-level transcriptions."
+description: >
+  Runs whisper.cpp against all movies and episodes in your Jellyfin library.
+  Creates a .whisper folder next to each media file containing a full JSON
+  transcription with per-word timestamps.
+category: "General"
+artifacts:
+  - "Jellyfin.Plugin.Whisper.dll"
+changelog: |-
+  ## v1.0.0.0
+  - Initial release: scheduled task that processes media with whisper.cpp.

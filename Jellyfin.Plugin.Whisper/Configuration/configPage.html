@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Whisper Transcription</title>
+</head>
+<body>
+    <div id="WhisperConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
+         data-require="emby-input,emby-button">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="WhisperConfigForm">
+                    <div class="formDialogContent">
+                        <div class="dialogContentInner dialog-content-centered">
+                            <div class="verticalSection">
+                                <h2 class="sectionTitle">Whisper Transcription Settings</h2>
+                                <div class="inputContainer">
+                                    <label class="inputLabel inputLabelUnfocused" for="WhisperCppPath">
+                                        whisper-cpp Binary Path
+                                    </label>
+                                    <input id="WhisperCppPath" name="WhisperCppPath" type="text"
+                                           is="emby-input" class="emby-input" />
+                                    <div class="fieldDescription">
+                                        Path to the whisper-cpp binary. Default: "whisper-cpp" (on PATH via homebrew).
+                                    </div>
+                                </div>
+                                <div class="inputContainer">
+                                    <label class="inputLabel inputLabelUnfocused" for="FfmpegPath">
+                                        ffmpeg Binary Path
+                                    </label>
+                                    <input id="FfmpegPath" name="FfmpegPath" type="text"
+                                           is="emby-input" class="emby-input" />
+                                    <div class="fieldDescription">
+                                        Path to ffmpeg for audio extraction. Default: "ffmpeg" (on PATH).
+                                    </div>
+                                </div>
+                                <div class="inputContainer">
+                                    <label class="inputLabel inputLabelUnfocused" for="WhisperModel">
+                                        Whisper Model
+                                    </label>
+                                    <input id="WhisperModel" name="WhisperModel" type="text"
+                                           is="emby-input" class="emby-input" />
+                                    <div class="fieldDescription">
+                                        Model name or path passed to whisper-cpp's --model flag. Default: "medium".
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="verticalSection">
+                                <h2 class="sectionTitle">EDL Mute Settings</h2>
+                                <div class="inputContainer">
+                                    <label class="inputLabel inputLabelUnfocused" for="MuteWords">
+                                        Mute Words / Phrases
+                                    </label>
+                                    <textarea id="MuteWords" name="MuteWords"
+                                              is="emby-textarea" class="emby-textarea"
+                                              rows="12"
+                                              style="font-family: monospace; resize: vertical;"></textarea>
+                                    <div class="fieldDescription">
+                                        Words or phrases to mute via EDL files. One per line. Case-insensitive.
+                                        Punctuation is stripped when matching against whisper tokens.
+                                        Multi-word phrases are matched against consecutive tokens.
+                                    </div>
+                                </div>
+                                <div class="inputContainer">
+                                    <label class="inputLabel inputLabelUnfocused" for="EdlBufferMs">
+                                        EDL Buffer (ms)
+                                    </label>
+                                    <input id="EdlBufferMs" name="EdlBufferMs" type="number"
+                                           is="emby-input" class="emby-input"
+                                           min="0" max="1000" step="10" />
+                                    <div class="fieldDescription">
+                                        Milliseconds of buffer added before and after each muted word.
+                                        Ensures the word is fully covered even if token timing is slightly off.
+                                        Default: 150.
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="verticalSection">
+                                <h2 class="sectionTitle">Actions</h2>
+                                <div style="display: flex; gap: 1em; flex-wrap: wrap;">
+                                    <button id="RegenEdlsBtn" is="emby-button" type="button"
+                                            class="raised emby-button"
+                                            style="margin-top: 0.5em;">
+                                        <span>Regenerate All EDL Files</span>
+                                    </button>
+                                    <button id="WipeMarkersBtn" is="emby-button" type="button"
+                                            class="raised emby-button"
+                                            style="margin-top: 0.5em;">
+                                        <span>Reset All Transcriptions</span>
+                                    </button>
+                                </div>
+                                <div class="fieldDescription" style="margin-top: 0.5em;">
+                                    <strong>Regenerate All EDL Files</strong> re-creates EDL mute files from
+                                    existing transcriptions using the current word list. Fast — does not re-run whisper.
+                                    <br/>
+                                    <strong>Reset All Transcriptions</strong> wipes all ".complete" markers so every
+                                    media file will be re-transcribed on the next scheduled task run.
+                                </div>
+                                <div id="RegenResult" style="margin-top: 0.5em; display: none;"></div>
+                                <div id="WipeResult" style="margin-top: 0.5em; display: none;"></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="formDialogFooter">
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>Save</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <script type="text/javascript">
+        var WhisperConfig = {
+            pluginUniqueId: 'a4c5f23e-8b1d-4f6a-9c3e-7d2b8e1f0a5c'
+        };
+
+        document.querySelector('#WhisperConfigPage')
+            .addEventListener('pageshow', function () {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(WhisperConfig.pluginUniqueId).then(function (config) {
+                    document.querySelector('#WhisperCppPath').value = config.WhisperCppPath || '';
+                    document.querySelector('#FfmpegPath').value = config.FfmpegPath || '';
+                    document.querySelector('#WhisperModel').value = config.WhisperModel || '';
+                    document.querySelector('#MuteWords').value = config.MuteWords || '';
+                    document.querySelector('#EdlBufferMs').value = config.EdlBufferMs || 150;
+                    Dashboard.hideLoadingMsg();
+                });
+            });
+
+        document.querySelector('#WhisperConfigForm')
+            .addEventListener('submit', function (e) {
+                Dashboard.showLoadingMsg();
+                ApiClient.getPluginConfiguration(WhisperConfig.pluginUniqueId).then(function (config) {
+                    config.WhisperCppPath = document.querySelector('#WhisperCppPath').value;
+                    config.FfmpegPath = document.querySelector('#FfmpegPath').value;
+                    config.WhisperModel = document.querySelector('#WhisperModel').value;
+                    config.MuteWords = document.querySelector('#MuteWords').value;
+                    config.EdlBufferMs = parseInt(document.querySelector('#EdlBufferMs').value, 10) || 150;
+                    ApiClient.updatePluginConfiguration(WhisperConfig.pluginUniqueId, config).then(function () {
+                        Dashboard.processPluginConfigurationUpdateResult();
+                    });
+                });
+                e.preventDefault();
+                return false;
+            });
+
+        document.querySelector('#RegenEdlsBtn')
+            .addEventListener('click', function () {
+                Dashboard.showLoadingMsg();
+                var resultEl = document.querySelector('#RegenResult');
+                resultEl.style.display = 'none';
+
+                ApiClient.ajax({
+                    url: ApiClient.getUrl('Whisper/RegenerateEdls'),
+                    type: 'POST',
+                    dataType: 'json'
+                }).then(function (result) {
+                    Dashboard.hideLoadingMsg();
+                    resultEl.style.display = 'block';
+                    resultEl.style.color = 'green';
+                    resultEl.innerHTML = 'Regenerated EDL files for ' + result.generated + ' media item(s).';
+                }, function () {
+                    Dashboard.hideLoadingMsg();
+                    resultEl.style.display = 'block';
+                    resultEl.style.color = 'red';
+                    resultEl.innerHTML = 'Failed to regenerate EDLs. Check the server log for details.';
+                });
+            });
+
+        document.querySelector('#WipeMarkersBtn')
+            .addEventListener('click', function () {
+                if (!confirm('This will mark all media for re-transcription on the next run. Continue?')) {
+                    return;
+                }
+
+                Dashboard.showLoadingMsg();
+                var resultEl = document.querySelector('#WipeResult');
+                resultEl.style.display = 'none';
+
+                ApiClient.ajax({
+                    url: ApiClient.getUrl('Whisper/WipeAllMarkers'),
+                    type: 'POST',
+                    dataType: 'json'
+                }).then(function (result) {
+                    Dashboard.hideLoadingMsg();
+                    resultEl.style.display = 'block';
+                    resultEl.style.color = 'green';
+                    resultEl.innerHTML = 'Wiped ' + result.wiped + ' marker(s). Items will be re-transcribed on the next scheduled run.';
+                }, function () {
+                    Dashboard.hideLoadingMsg();
+                    resultEl.style.display = 'block';
+                    resultEl.style.color = 'red';
+                    resultEl.innerHTML = 'Failed to wipe markers. Check the server log for details.';
+                });
+            });
+    </script>
+</body>
+</html>
