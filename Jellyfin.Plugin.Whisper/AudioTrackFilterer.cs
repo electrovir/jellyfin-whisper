@@ -190,30 +190,71 @@ public class AudioTrackFilterer
 
     /// <summary>
     /// Safely replaces the media file with the processed temp file.
-    /// Copies to a staging file on the same volume as the media first, then
-    /// performs a same-filesystem rename. This prevents corruption if the
-    /// copy is interrupted (e.g. by an external drive disconnecting).
+    /// Copies to a staging file on the same volume, then swaps via renames
+    /// (never using overwrite) to avoid filesystem conflicts with open handles.
+    /// This prevents volume unmounts on macOS when Jellyfin has the file open.
     /// </summary>
     private static void SafeReplaceMediaFile(string localTempPath, string mediaPath)
     {
         var stagingPath = mediaPath + ".whisper-staging";
+        var backupPath = mediaPath + ".whisper-old";
+
+        // Clean up any leftover files from a previous interrupted replacement.
+        TryDeleteFile(stagingPath);
+        TryDeleteFile(backupPath);
+
         try
         {
+            // Step 1: Copy the processed file to a staging path on the same volume.
             System.IO.File.Copy(localTempPath, stagingPath, overwrite: true);
-            System.IO.File.Move(stagingPath, mediaPath, overwrite: true);
+
+            // Step 2: Brief pause to let the filesystem flush writes before renaming.
+            Thread.Sleep(1000);
+
+            // Step 3: Move the original aside (simple rename, no overwrite, no data I/O).
+            System.IO.File.Move(mediaPath, backupPath);
+
+            // Step 4: Move the staging file to the original name (simple rename, no overwrite).
+            System.IO.File.Move(stagingPath, mediaPath);
+
+            // Step 5: Delete the backup of the original file.
+            TryDeleteFile(backupPath);
         }
-        finally
+        catch
         {
-            if (System.IO.File.Exists(stagingPath))
+            // If step 4 failed, the original is at backupPath. Restore it.
+            if (!System.IO.File.Exists(mediaPath) && System.IO.File.Exists(backupPath))
             {
                 try
                 {
-                    System.IO.File.Delete(stagingPath);
+                    System.IO.File.Move(backupPath, mediaPath);
                 }
                 catch (IOException)
                 {
-                    // Best effort cleanup.
+                    // Best effort restoration.
                 }
+            }
+
+            throw;
+        }
+        finally
+        {
+            TryDeleteFile(stagingPath);
+            TryDeleteFile(backupPath);
+        }
+    }
+
+    private static void TryDeleteFile(string path)
+    {
+        if (System.IO.File.Exists(path))
+        {
+            try
+            {
+                System.IO.File.Delete(path);
+            }
+            catch (IOException)
+            {
+                // Best effort cleanup.
             }
         }
     }
