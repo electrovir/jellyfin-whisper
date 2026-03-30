@@ -41,6 +41,18 @@
                                 Full file path to a downloaded .bin model file (e.g. /Users/media/ggml-medium.bin).
                             </div>
                         </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="TempDirectory">
+                                Temp Directory
+                            </label>
+                            <input id="TempDirectory" name="TempDirectory" type="text"
+                                   is="emby-input" class="emby-input" />
+                            <div class="fieldDescription">
+                                Local directory for temporary files during processing. Reduces sustained
+                                I/O on external or network-attached media drives. Leave empty to use the
+                                system temp directory.
+                            </div>
+                        </div>
                     </div>
                     <div class="verticalSection">
                         <h2 class="sectionTitle">EDL Mute Settings</h2>
@@ -117,6 +129,7 @@
                         document.querySelector('#WhisperCppPath').value = config.WhisperCppPath || '';
                         document.querySelector('#FfmpegPath').value = config.FfmpegPath || '';
                         document.querySelector('#WhisperModel').value = config.WhisperModel || '';
+                        document.querySelector('#TempDirectory').value = config.TempDirectory || '';
                         document.querySelector('#MuteWords').value = config.MuteWords || '';
                         document.querySelector('#EdlBufferMs').value = config.EdlBufferMs || 150;
                         Dashboard.hideLoadingMsg();
@@ -131,6 +144,7 @@
                         config.WhisperCppPath = document.querySelector('#WhisperCppPath').value;
                         config.FfmpegPath = document.querySelector('#FfmpegPath').value;
                         config.WhisperModel = document.querySelector('#WhisperModel').value;
+                        config.TempDirectory = document.querySelector('#TempDirectory').value;
                         config.MuteWords = document.querySelector('#MuteWords').value;
                         config.EdlBufferMs = parseInt(document.querySelector('#EdlBufferMs').value, 10) || 150;
                         ApiClient.updatePluginConfiguration(WhisperConfig.pluginUniqueId, config).then(function (result) {

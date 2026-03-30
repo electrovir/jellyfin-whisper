@@ -77,4 +77,11 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Helps ensure the muted word is fully covered. Default: 150ms.
     /// </summary>
     public int EdlBufferMs { get; set; } = 150;
+
+    /// <summary>
+    /// Gets or sets the local directory for temporary files during processing.
+    /// Reduces sustained I/O on external or network-attached media drives.
+    /// When empty, defaults to the system temp directory.
+    /// </summary>
+    public string TempDirectory { get; set; } = string.Empty;
 }

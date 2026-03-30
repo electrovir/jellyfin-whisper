@@ -22,14 +22,16 @@ public class AudioTrackFilterer
     private const string FilteredTrackPrefix = "(filtered) ";
 
     private readonly string _ffmpegPath;
+    private readonly string _tempDirectory;
     private readonly ILogger _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AudioTrackFilterer"/> class.
     /// </summary>
-    public AudioTrackFilterer(string ffmpegPath, ILogger logger)
+    public AudioTrackFilterer(string ffmpegPath, string tempDirectory, ILogger logger)
     {
         _ffmpegPath = ffmpegPath;
+        _tempDirectory = tempDirectory;
         _logger = logger;
     }
 
@@ -52,7 +54,6 @@ public class AudioTrackFilterer
             return;
         }
 
-        var whisperDir = Path.GetDirectoryName(edlPath)!;
         var probeOutput = await ProbeAudioStreamsAsync(mediaPath, cancellationToken).ConfigureAwait(false);
         var streams = probeOutput.Streams;
         var formatName = probeOutput.FormatName;
@@ -74,7 +75,7 @@ public class AudioTrackFilterer
         if (existingFilteredStreams.Count > 0)
         {
             WhisperFileLogger.Info($"Removing {existingFilteredStreams.Count} existing filtered track(s) from: {mediaPath}");
-            await RemoveFilteredTracksAsync(mediaPath, streams, existingFilteredStreams, formatName, whisperDir, cancellationToken)
+            await RemoveFilteredTracksAsync(mediaPath, streams, existingFilteredStreams, formatName, cancellationToken)
                 .ConfigureAwait(false);
 
             // Re-probe after removal to get updated stream indices.
@@ -85,10 +86,11 @@ public class AudioTrackFilterer
         }
 
         var volumeFilter = BuildVolumeFilter(muteRegions);
-        var tempPath = Path.Combine(whisperDir, "filtering.tmp");
+        var tempPath = Path.Combine(_tempDirectory, "filtering.tmp");
 
         try
         {
+            WhisperProcessor.EnsureSufficientTempSpace(_tempDirectory, mediaPath);
             var args = BuildFfmpegArgs(mediaPath, tempPath, streams, englishStreams, volumeFilter, formatName);
             WhisperFileLogger.Info($"Adding {englishStreams.Count} filtered audio track(s) to: {mediaPath}");
 
@@ -101,8 +103,7 @@ public class AudioTrackFilterer
                     $"ffmpeg audio filtering exited with code {exitCode} for: {mediaPath}");
             }
 
-            // Atomic replace: rename temp over original.
-            System.IO.File.Move(tempPath, mediaPath, overwrite: true);
+            SafeReplaceMediaFile(tempPath, mediaPath);
             WhisperFileLogger.Info($"Filtered audio tracks added successfully to: {mediaPath}");
         }
         finally
@@ -127,10 +128,10 @@ public class AudioTrackFilterer
         List<AudioStreamInfo> allStreams,
         List<AudioStreamInfo> filteredStreams,
         string formatName,
-        string whisperDir,
         CancellationToken cancellationToken)
     {
-        var tempPath = Path.Combine(whisperDir, "removing.tmp");
+        WhisperProcessor.EnsureSufficientTempSpace(_tempDirectory, mediaPath);
+        var tempPath = Path.Combine(_tempDirectory, "removing.tmp");
         var filteredIndices = new HashSet<int>(filteredStreams.Select(s => s.Index));
 
         // Build ffmpeg args that map all streams EXCEPT the filtered ones.
@@ -169,7 +170,7 @@ public class AudioTrackFilterer
                     $"ffmpeg failed to remove filtered tracks (exit code {exitCode}) for: {mediaPath}");
             }
 
-            System.IO.File.Move(tempPath, mediaPath, overwrite: true);
+            SafeReplaceMediaFile(tempPath, mediaPath);
         }
         finally
         {
@@ -178,6 +179,36 @@ public class AudioTrackFilterer
                 try
                 {
                     System.IO.File.Delete(tempPath);
+                }
+                catch (IOException)
+                {
+                    // Best effort cleanup.
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Safely replaces the media file with the processed temp file.
+    /// Copies to a staging file on the same volume as the media first, then
+    /// performs a same-filesystem rename. This prevents corruption if the
+    /// copy is interrupted (e.g. by an external drive disconnecting).
+    /// </summary>
+    private static void SafeReplaceMediaFile(string localTempPath, string mediaPath)
+    {
+        var stagingPath = mediaPath + ".whisper-staging";
+        try
+        {
+            System.IO.File.Copy(localTempPath, stagingPath, overwrite: true);
+            System.IO.File.Move(stagingPath, mediaPath, overwrite: true);
+        }
+        finally
+        {
+            if (System.IO.File.Exists(stagingPath))
+            {
+                try
+                {
+                    System.IO.File.Delete(stagingPath);
                 }
                 catch (IOException)
                 {

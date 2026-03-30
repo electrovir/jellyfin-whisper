@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -96,7 +97,8 @@ public class WhisperProcessor
         }
 
         WhisperFileLogger.Info($"Re-applying EDL as filtered audio tracks to: {mediaPath}");
-        var filterer = new AudioTrackFilterer(_config.FfmpegPath, _logger);
+        var tempDir = GetResolvedTempDirectory(_config.TempDirectory);
+        var filterer = new AudioTrackFilterer(_config.FfmpegPath, tempDir, _logger);
         await filterer.FilterAsync(mediaPath, edlPath, cancellationToken).ConfigureAwait(false);
 
         await File.WriteAllTextAsync(
@@ -123,11 +125,13 @@ public class WhisperProcessor
     {
         Directory.CreateDirectory(outputDir);
 
-        var wavPath = Path.Combine(outputDir, "audio.wav");
+        var tempDir = GetResolvedTempDirectory(_config.TempDirectory);
+        var wavPath = Path.Combine(tempDir, "audio.wav");
         var succeeded = false;
 
         try
         {
+            EnsureSufficientTempSpace(tempDir, mediaPath);
             WhisperFileLogger.Info($"Step 1/4: Extracting audio from: {mediaPath}");
             _logger.LogInformation("Extracting audio from: {MediaPath}", mediaPath);
             await ExtractAudioAsync(mediaPath, wavPath, cancellationToken).ConfigureAwait(false);
@@ -136,6 +140,13 @@ public class WhisperProcessor
             WhisperFileLogger.Info($"Step 2/4: Audio extracted ({wavSize:F0} MB). Running whisper-cli on: {mediaPath}");
             _logger.LogInformation("Running whisper.cpp on: {MediaPath}", mediaPath);
             await RunWhisperAsync(wavPath, outputDir, cancellationToken).ConfigureAwait(false);
+
+            // Delete WAV now that whisper is done to free temp space before filtering.
+            if (File.Exists(wavPath))
+            {
+                File.Delete(wavPath);
+            }
+
             WhisperFileLogger.Info($"Step 3/4: Whisper complete. Generating EDL for: {mediaPath}");
 
             // Generate EDL mute file from the transcription if mute words are configured.
@@ -159,7 +170,7 @@ public class WhisperProcessor
             if (File.Exists(edlPath) && !File.Exists(edlAppliedPath))
             {
                 WhisperFileLogger.Info($"Step 4/4: Applying EDL as filtered audio tracks to: {mediaPath}");
-                var filterer = new AudioTrackFilterer(_config.FfmpegPath, _logger);
+                var filterer = new AudioTrackFilterer(_config.FfmpegPath, tempDir, _logger);
                 await filterer.FilterAsync(mediaPath, edlPath, cancellationToken).ConfigureAwait(false);
 
                 await File.WriteAllTextAsync(
@@ -301,5 +312,56 @@ public class WhisperProcessor
         }
 
         return process.ExitCode;
+    }
+
+    /// <summary>
+    /// Resolves the temp directory path: uses the configured path or falls back to the system temp.
+    /// Creates a "jellyfin-whisper" subdirectory to keep temp files organized.
+    /// </summary>
+    public static string GetResolvedTempDirectory(string configuredTempDir)
+    {
+        var baseDir = string.IsNullOrWhiteSpace(configuredTempDir)
+            ? Path.GetTempPath()
+            : configuredTempDir;
+        var tempDir = Path.Combine(baseDir, "jellyfin-whisper");
+        Directory.CreateDirectory(tempDir);
+        return tempDir;
+    }
+
+    /// <summary>
+    /// Checks that the temp directory has enough free space to process the given media file.
+    /// Requires at least as much free space as the media file's size.
+    /// </summary>
+    public static void EnsureSufficientTempSpace(string tempDir, string mediaPath)
+    {
+        var mediaFileInfo = new FileInfo(mediaPath);
+        if (!mediaFileInfo.Exists)
+        {
+            return;
+        }
+
+        var requiredBytes = mediaFileInfo.Length;
+        var availableBytes = GetAvailableFreeSpace(tempDir);
+
+        if (availableBytes >= 0 && availableBytes < requiredBytes)
+        {
+            var requiredGb = requiredBytes / (1024.0 * 1024.0 * 1024.0);
+            var availableGb = availableBytes / (1024.0 * 1024.0 * 1024.0);
+            throw new InvalidOperationException(
+                $"Insufficient disk space in temp directory '{tempDir}' to process '{Path.GetFileName(mediaPath)}'. "
+                + $"Required: {requiredGb:F1} GB, Available: {availableGb:F1} GB. "
+                + "Free up space or change the Temp Directory in plugin settings.");
+        }
+    }
+
+    private static long GetAvailableFreeSpace(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var bestMatch = DriveInfo.GetDrives()
+            .Where(d => d.IsReady && fullPath.StartsWith(d.RootDirectory.FullName, StringComparison.Ordinal))
+            .OrderByDescending(d => d.RootDirectory.FullName.Length)
+            .FirstOrDefault();
+
+        return bestMatch?.AvailableFreeSpace ?? -1;
     }
 }
