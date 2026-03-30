@@ -109,7 +109,8 @@ public class WhisperQueueService : IHostedService, IDisposable
         _consumerTask = ConsumeAsync(_cts.Token);
 
         // Scan for unprocessed items on a background thread so StartAsync returns quickly.
-        _ = Task.Run(() => EnqueueUnprocessedItems(), CancellationToken.None);
+        // Delay the initial scan to give the library time to finish loading.
+        _ = Task.Run(async () => await ScanWithRetryAsync(_cts.Token).ConfigureAwait(false), _cts.Token);
 
         _logger.LogInformation("Whisper queue service started.");
         WhisperFileLogger.Info($"Whisper queue service started. Log file: {WhisperFileLogger.LogPath}");
@@ -143,7 +144,7 @@ public class WhisperQueueService : IHostedService, IDisposable
     /// Scans the entire library and enqueues any items that are missing
     /// a .whisper folder or .complete marker.
     /// </summary>
-    public void EnqueueUnprocessedItems()
+    public int EnqueueUnprocessedItems()
     {
         var items = _libraryManager.GetItemList(new InternalItemsQuery
         {
@@ -153,11 +154,22 @@ public class WhisperQueueService : IHostedService, IDisposable
         });
 
         var queued = 0;
+        var skippedNoPath = 0;
+        var skippedNotFound = 0;
+        var skippedExcluded = 0;
+        var skippedProcessed = 0;
 
         foreach (var item in items)
         {
-            if (string.IsNullOrEmpty(item.Path) || !File.Exists(item.Path))
+            if (string.IsNullOrEmpty(item.Path))
             {
+                skippedNoPath++;
+                continue;
+            }
+
+            if (!File.Exists(item.Path))
+            {
+                skippedNotFound++;
                 continue;
             }
 
@@ -165,10 +177,59 @@ public class WhisperQueueService : IHostedService, IDisposable
             {
                 queued++;
             }
+            else if (WhisperProcessor.IsExcluded(item.Path))
+            {
+                skippedExcluded++;
+            }
+            else
+            {
+                skippedProcessed++;
+            }
         }
 
-        _logger.LogInformation("Library scan complete: queued {Count} unprocessed item(s).", queued);
-        WhisperFileLogger.Info($"Library scan complete: queued {queued} unprocessed item(s).");
+        var summary = $"Library scan complete: {items.Count} item(s) found, {queued} queued"
+            + $", {skippedProcessed} already processed, {skippedExcluded} excluded"
+            + $", {skippedNoPath} no path, {skippedNotFound} file not found.";
+        _logger.LogInformation("{Summary}", summary);
+        WhisperFileLogger.Info(summary);
+
+        return queued;
+    }
+
+    private async Task ScanWithRetryAsync(CancellationToken cancellationToken)
+    {
+        // Wait for the library to finish loading before scanning.
+        await Task.Delay(TimeSpan.FromSeconds(30), cancellationToken).ConfigureAwait(false);
+
+        const int maxAttempts = 3;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            try
+            {
+                var queued = EnqueueUnprocessedItems();
+                if (queued > 0 || attempt == maxAttempts)
+                {
+                    return;
+                }
+
+                WhisperFileLogger.Info($"No items found on attempt {attempt}/{maxAttempts}, retrying after delay...");
+                await Task.Delay(TimeSpan.FromSeconds(30 * attempt), cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Library scan attempt {Attempt}/{MaxAttempts} failed.", attempt, maxAttempts);
+                WhisperFileLogger.Error($"Library scan attempt {attempt}/{maxAttempts} failed: {ex.Message}");
+
+                if (attempt < maxAttempts)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(30 * attempt), cancellationToken).ConfigureAwait(false);
+                }
+            }
+        }
     }
 
     private void RefreshLibraryItem(string mediaPath)
