@@ -17,7 +17,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Restore dependencies
         run: dotnet restore
@@ -59,4 +59,4 @@ jobs:
             ${{ steps.changelog.outputs.log }}
           make_latest: ${{ github.ref_name == github.event.repository.default_branch }}
           files: |
-            Jellyfin.Plugin.Whisper/bin/Release/net8.0/Jellyfin.Plugin.Whisper.dll
+            Jellyfin.Plugin.Whisper/bin/Release/net10.0/Jellyfin.Plugin.Whisper.dll

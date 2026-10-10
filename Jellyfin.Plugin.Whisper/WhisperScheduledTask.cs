@@ -53,7 +53,7 @@ public class WhisperScheduledTask : IScheduledTask
         {
             new TaskTriggerInfo
             {
-                Type = TaskTriggerInfo.TriggerDaily,
+                Type = TaskTriggerInfoType.DailyTrigger,
                 TimeOfDayTicks = TimeSpan.FromHours(2).Ticks,
             },
         };

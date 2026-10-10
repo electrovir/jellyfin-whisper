@@ -22,16 +22,14 @@ public class AudioTrackFilterer
     private const string FilteredTrackPrefix = "(filtered) ";
 
     private readonly string _ffmpegPath;
-    private readonly string _tempDirectory;
     private readonly ILogger _logger;
 
     /// <summary>
     /// Initializes a new instance of the <see cref="AudioTrackFilterer"/> class.
     /// </summary>
-    public AudioTrackFilterer(string ffmpegPath, string tempDirectory, ILogger logger)
+    public AudioTrackFilterer(string ffmpegPath, ILogger logger)
     {
         _ffmpegPath = ffmpegPath;
-        _tempDirectory = tempDirectory;
         _logger = logger;
     }
 
@@ -54,6 +52,7 @@ public class AudioTrackFilterer
             return;
         }
 
+        var whisperDir = Path.GetDirectoryName(edlPath)!;
         var probeOutput = await ProbeAudioStreamsAsync(mediaPath, cancellationToken).ConfigureAwait(false);
         var streams = probeOutput.Streams;
         var formatName = probeOutput.FormatName;
@@ -75,7 +74,7 @@ public class AudioTrackFilterer
         if (existingFilteredStreams.Count > 0)
         {
             WhisperFileLogger.Info($"Removing {existingFilteredStreams.Count} existing filtered track(s) from: {mediaPath}");
-            await RemoveFilteredTracksAsync(mediaPath, streams, existingFilteredStreams, formatName, cancellationToken)
+            await RemoveFilteredTracksAsync(mediaPath, streams, existingFilteredStreams, formatName, whisperDir, cancellationToken)
                 .ConfigureAwait(false);
 
             // Re-probe after removal to get updated stream indices.
@@ -86,11 +85,10 @@ public class AudioTrackFilterer
         }
 
         var volumeFilter = BuildVolumeFilter(muteRegions);
-        var tempPath = Path.Combine(_tempDirectory, "filtering.tmp");
+        var tempPath = Path.Combine(whisperDir, "filtering.tmp");
 
         try
         {
-            WhisperProcessor.EnsureSufficientTempSpace(_tempDirectory, mediaPath);
             var args = BuildFfmpegArgs(mediaPath, tempPath, streams, englishStreams, volumeFilter, formatName);
             WhisperFileLogger.Info($"Adding {englishStreams.Count} filtered audio track(s) to: {mediaPath}");
 
@@ -103,7 +101,8 @@ public class AudioTrackFilterer
                     $"ffmpeg audio filtering exited with code {exitCode} for: {mediaPath}");
             }
 
-            SafeReplaceMediaFile(tempPath, mediaPath);
+            // Atomic replace: rename temp over original.
+            System.IO.File.Move(tempPath, mediaPath, overwrite: true);
             WhisperFileLogger.Info($"Filtered audio tracks added successfully to: {mediaPath}");
         }
         finally
@@ -128,10 +127,10 @@ public class AudioTrackFilterer
         List<AudioStreamInfo> allStreams,
         List<AudioStreamInfo> filteredStreams,
         string formatName,
+        string whisperDir,
         CancellationToken cancellationToken)
     {
-        WhisperProcessor.EnsureSufficientTempSpace(_tempDirectory, mediaPath);
-        var tempPath = Path.Combine(_tempDirectory, "removing.tmp");
+        var tempPath = Path.Combine(whisperDir, "removing.tmp");
         var filteredIndices = new HashSet<int>(filteredStreams.Select(s => s.Index));
 
         // Build ffmpeg args that map all streams EXCEPT the filtered ones.
@@ -170,7 +169,7 @@ public class AudioTrackFilterer
                     $"ffmpeg failed to remove filtered tracks (exit code {exitCode}) for: {mediaPath}");
             }
 
-            SafeReplaceMediaFile(tempPath, mediaPath);
+            System.IO.File.Move(tempPath, mediaPath, overwrite: true);
         }
         finally
         {
@@ -184,77 +183,6 @@ public class AudioTrackFilterer
                 {
                     // Best effort cleanup.
                 }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Safely replaces the media file with the processed temp file.
-    /// Copies to a staging file on the same volume, then swaps via renames
-    /// (never using overwrite) to avoid filesystem conflicts with open handles.
-    /// This prevents volume unmounts on macOS when Jellyfin has the file open.
-    /// </summary>
-    private static void SafeReplaceMediaFile(string localTempPath, string mediaPath)
-    {
-        var stagingPath = mediaPath + ".whisper-staging";
-        var backupPath = mediaPath + ".whisper-old";
-
-        // Clean up any leftover files from a previous interrupted replacement.
-        TryDeleteFile(stagingPath);
-        TryDeleteFile(backupPath);
-
-        try
-        {
-            // Step 1: Copy the processed file to a staging path on the same volume.
-            System.IO.File.Copy(localTempPath, stagingPath, overwrite: true);
-
-            // Step 2: Brief pause to let the filesystem flush writes before renaming.
-            Thread.Sleep(1000);
-
-            // Step 3: Move the original aside (simple rename, no overwrite, no data I/O).
-            System.IO.File.Move(mediaPath, backupPath);
-
-            // Step 4: Move the staging file to the original name (simple rename, no overwrite).
-            System.IO.File.Move(stagingPath, mediaPath);
-
-            // Step 5: Delete the backup of the original file.
-            TryDeleteFile(backupPath);
-        }
-        catch
-        {
-            // If step 4 failed, the original is at backupPath. Restore it.
-            if (!System.IO.File.Exists(mediaPath) && System.IO.File.Exists(backupPath))
-            {
-                try
-                {
-                    System.IO.File.Move(backupPath, mediaPath);
-                }
-                catch (IOException)
-                {
-                    // Best effort restoration.
-                }
-            }
-
-            throw;
-        }
-        finally
-        {
-            TryDeleteFile(stagingPath);
-            TryDeleteFile(backupPath);
-        }
-    }
-
-    private static void TryDeleteFile(string path)
-    {
-        if (System.IO.File.Exists(path))
-        {
-            try
-            {
-                System.IO.File.Delete(path);
-            }
-            catch (IOException)
-            {
-                // Best effort cleanup.
             }
         }
     }
