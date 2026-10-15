@@ -4,6 +4,7 @@ using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,6 +19,10 @@ namespace Jellyfin.Plugin.Whisper;
 /// </summary>
 public class EdlGenerator
 {
+    private const long MaxDtwTokenMs = 1500;
+
+    private static readonly Regex CensorPattern = new(@"^(-{3,}|\*{2,})", RegexOptions.Compiled);
+
     private readonly ILogger _logger;
 
     /// <summary>
@@ -65,7 +70,23 @@ public class EdlGenerator
             return;
         }
 
+        ApplyDtwTimings(whisperOutput.Transcription);
+
         var regions = FindMuteRegions(whisperOutput.Transcription, singleWords, phrases, bufferMs);
+
+        var subtitlesPath = Path.Combine(
+            Path.GetDirectoryName(transcriptionJsonPath) ?? string.Empty,
+            SubtitleMuteFinder.SubtitlesFileName);
+        if (File.Exists(subtitlesPath))
+        {
+            var srtText = await File.ReadAllTextAsync(subtitlesPath, cancellationToken).ConfigureAwait(false);
+            var subtitleRegions = SubtitleMuteFinder.Find(srtText, whisperOutput.Transcription, muteEntries, regions, bufferMs);
+            _logger.LogInformation(
+                "Subtitles added {Count} mute region(s) whisper missed for: {MediaPath}",
+                subtitleRegions.Count,
+                mediaPath);
+            regions.AddRange(subtitleRegions);
+        }
 
         if (regions.Count == 0)
         {
@@ -106,6 +127,35 @@ public class EdlGenerator
             .ToList();
     }
 
+    /// <summary>
+    /// Replaces each text token's offsets with its DTW-aligned timing when the transcription
+    /// was produced with whisper-cli --dtw. Transcriptions without DTW are left unchanged.
+    /// </summary>
+    private static void ApplyDtwTimings(List<WhisperJsonSegment> segments)
+    {
+        // whisper.cpp leaves t_dtw at -1 for special tokens and when DTW is disabled.
+        var timedTokens = segments
+            .SelectMany(s => s.Tokens ?? new List<WhisperJsonToken>())
+            .Where(t => t.DtwTime >= 0)
+            .ToList();
+
+        for (var i = 0; i < timedTokens.Count; i++)
+        {
+            // t_dtw is in centiseconds and marks only where the token starts.
+            var startMs = (long)(timedTokens[i].DtwTime!.Value * 10);
+            var nextStartMs = i + 1 < timedTokens.Count
+                ? (long)(timedTokens[i + 1].DtwTime!.Value * 10)
+                : startMs + MaxDtwTokenMs;
+
+            timedTokens[i].Offsets = new WhisperJsonOffsets
+            {
+                From = startMs,
+                // The gap before the next token can span a long pause; don't mute all of it.
+                To = Math.Clamp(nextStartMs, startMs, startMs + MaxDtwTokenMs),
+            };
+        }
+    }
+
     private static List<MuteRegion> FindMuteRegions(
         List<WhisperJsonSegment> segments,
         HashSet<string> singleWords,
@@ -132,6 +182,33 @@ public class EdlGenerator
                         token.Offsets.To + bufferMs,
                         clean));
                 }
+            }
+
+            // whisper sometimes transcribes profanity censored, as tokens like " f", "---", "ed".
+            // Stutters ("I--") use two dashes, so require three or asterisks.
+            for (var i = 0; i < segment.Tokens.Count - 1; i++)
+            {
+                var letter = segment.Tokens[i].Text.Trim();
+                if (letter.Length != 1
+                    || !singleWords.Any(w => w.StartsWith(letter, StringComparison.OrdinalIgnoreCase))
+                    || !CensorPattern.IsMatch(segment.Tokens[i + 1].Text))
+                {
+                    continue;
+                }
+
+                // Include the rest of the word, such as the "ed" in "f---ed".
+                var last = i + 1;
+                while (last + 1 < segment.Tokens.Count
+                    && !segment.Tokens[last + 1].Text.StartsWith(' ')
+                    && StripPunctuation(segment.Tokens[last + 1].Text).Length > 0)
+                {
+                    last++;
+                }
+
+                regions.Add(new MuteRegion(
+                    Math.Max(0, segment.Tokens[i].Offsets.From - bufferMs),
+                    segment.Tokens[last].Offsets.To + bufferMs,
+                    string.Concat(segment.Tokens.Skip(i).Take(last - i + 1).Select(t => t.Text)).Trim()));
             }
 
             // Match multi-word phrases against consecutive tokens.
@@ -217,7 +294,7 @@ public class EdlGenerator
         await File.WriteAllLinesAsync(edlPath, lines, cancellationToken).ConfigureAwait(false);
     }
 
-    private sealed record MuteRegion(long StartMs, long EndMs, string MatchedWord);
+    internal sealed record MuteRegion(long StartMs, long EndMs, string MatchedWord);
 }
 
 // --- whisper.cpp JSON output models (--output-json-full) ---
@@ -286,6 +363,13 @@ public class WhisperJsonToken
     /// </summary>
     [JsonPropertyName("p")]
     public double Probability { get; set; }
+
+    /// <summary>
+    /// Gets or sets the DTW-aligned token start time in centiseconds, or -1 when unavailable.
+    /// Present only when whisper-cli ran with --dtw (older versions omit it otherwise).
+    /// </summary>
+    [JsonPropertyName("t_dtw")]
+    public double? DtwTime { get; set; }
 }
 
 /// <summary>

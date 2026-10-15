@@ -41,6 +41,28 @@
                                 Full file path to a downloaded .bin model file (e.g. /Users/media/ggml-medium.bin).
                             </div>
                         </div>
+                        <div class="selectContainer">
+                            <label class="selectLabel" for="WhisperDtwPreset">Word Timing (DTW) Preset</label>
+                            <select id="WhisperDtwPreset" name="WhisperDtwPreset" is="emby-select" class="emby-select-withcolor emby-select">
+                                <option value="">Auto (from model file name)</option>
+                                <option value="off">Off</option>
+                                <option value="tiny">tiny</option>
+                                <option value="tiny.en">tiny.en</option>
+                                <option value="base">base</option>
+                                <option value="base.en">base.en</option>
+                                <option value="small">small</option>
+                                <option value="small.en">small.en</option>
+                                <option value="medium">medium</option>
+                                <option value="medium.en">medium.en</option>
+                                <option value="large.v1">large.v1</option>
+                                <option value="large.v2">large.v2</option>
+                                <option value="large.v3">large.v3</option>
+                                <option value="large.v3.turbo">large.v3.turbo</option>
+                            </select>
+                            <div class="fieldDescription">
+                                Makes mute timing much more accurate. Auto works for model files with their original names (e.g. ggml-medium.bin is "medium"). For a renamed model, pick the preset matching it. Only affects newly transcribed files.
+                            </div>
+                        </div>
                     </div>
                     <div class="verticalSection">
                         <h2 class="sectionTitle">EDL Mute Settings</h2>
@@ -117,6 +139,7 @@
                         document.querySelector('#WhisperCppPath').value = config.WhisperCppPath || '';
                         document.querySelector('#FfmpegPath').value = config.FfmpegPath || '';
                         document.querySelector('#WhisperModel').value = config.WhisperModel || '';
+                        document.querySelector('#WhisperDtwPreset').value = config.WhisperDtwPreset || '';
                         document.querySelector('#MuteWords').value = config.MuteWords || '';
                         document.querySelector('#EdlBufferMs').value = config.EdlBufferMs || 150;
                         Dashboard.hideLoadingMsg();
@@ -131,6 +154,7 @@
                         config.WhisperCppPath = document.querySelector('#WhisperCppPath').value;
                         config.FfmpegPath = document.querySelector('#FfmpegPath').value;
                         config.WhisperModel = document.querySelector('#WhisperModel').value;
+                        config.WhisperDtwPreset = document.querySelector('#WhisperDtwPreset').value;
                         config.MuteWords = document.querySelector('#MuteWords').value;
                         config.EdlBufferMs = parseInt(document.querySelector('#EdlBufferMs').value, 10) || 150;
                         ApiClient.updatePluginConfiguration(WhisperConfig.pluginUniqueId, config).then(function (result) {

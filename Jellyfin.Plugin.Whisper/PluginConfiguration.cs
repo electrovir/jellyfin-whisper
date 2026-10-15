@@ -27,6 +27,14 @@ public class PluginConfiguration : BasePluginConfiguration
     public string WhisperModel { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the whisper-cli --dtw preset matching <see cref="WhisperModel"/>
+    /// (e.g. "medium", "large.v3"), which enables accurate word-level timestamps.
+    /// Empty picks the preset from the model file name. "off" falls back to whisper's
+    /// much less precise token timing.
+    /// </summary>
+    public string WhisperDtwPreset { get; set; } = string.Empty;
+
+    /// <summary>
     /// Gets or sets the list of words or phrases to mute via EDL files.
     /// One entry per line. Case-insensitive. Punctuation is stripped when matching.
     /// </summary>
@@ -55,6 +63,7 @@ public class PluginConfiguration : BasePluginConfiguration
         "fucker",
         "fuckers",
         "fucking",
+        "god damn",
         "goddamn",
         "goddammit",
         "horseshit",

@@ -7,6 +7,7 @@ A Jellyfin plugin that automatically transcribes media files using [whisper.cpp]
 1. Extracts audio from every movie and episode in your Jellyfin library.
 2. Runs whisper.cpp to produce word-level transcription JSON.
 3. Scans the transcription for configurable mute words/phrases and generates a `.edl` file with mute timestamps.
+   - If the file has a text subtitle track (embedded SRT/ASS/WebVTT, or a sidecar `.srt`), mute words in the subtitles that whisper failed to transcribe are muted too, placed between the surrounding words whisper did hear. Image-based subtitles (DVD, PGS) can't be read.
 4. Adds filtered audio tracks to the MKV with those words muted. Original audio is preserved.
 
 Users can switch between the filtered and original audio tracks in the Jellyfin player on any client (web, iOS, Apple TV, etc.) without any transcoding.
@@ -18,6 +19,7 @@ Output is stored in a `.whisper/` directory next to each media file:
 ├── Movie.mkv              # Now contains filtered + original audio tracks
 └── Movie.whisper/
     ├── transcription.json  # Full whisper output with per-word timestamps
+    ├── subtitles.srt       # Text subtitles used to catch words whisper missed (if available)
     ├── transcription.edl   # Mute regions for matched words (with comments)
     ├── .edl-applied        # Marker indicating filtered tracks were added
     └── .complete           # Marker indicating processing finished
@@ -84,6 +86,7 @@ Open **Dashboard > Plugins > Whisper Transcription** in the Jellyfin web UI.
 | **whisper-cpp Binary Path** | `/opt/homebrew/bin/whisper-cli` | Full path to the whisper-cli binary. See [Finding binary paths](#finding-binary-paths) below. |
 | **ffmpeg Binary Path** | `ffmpeg` | Path to ffmpeg. Usually already available in Jellyfin. |
 | **Whisper Model** | *(empty - must be set)* | Full file path to a downloaded `.bin` model file (e.g. `~/ggml-medium.bin`). See [Prerequisites](#whisper-cpp). |
+| **Word Timing (DTW) Preset** | Auto | Passes `--dtw <preset> --no-flash-attn` to whisper-cli for accurate per-word timestamps. Auto picks the preset from the model file name (`ggml-medium.bin` is `medium`, `ggml-large-v3-turbo-q5_0.bin` is `large.v3.turbo`); pick one manually for a renamed model. Without DTW, word times are estimated and mutes can be off by seconds. Only affects newly transcribed files. |
 | **Mute Words / Phrases** | Common profanity list | One word or phrase per line. Case-insensitive. Punctuation is stripped when matching. Multi-word phrases match against consecutive whisper tokens. |
 | **EDL Buffer (ms)** | `150` | Milliseconds of buffer added before and after each muted word to ensure full coverage. |
 

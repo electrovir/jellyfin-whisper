@@ -369,21 +369,31 @@ public class AudioTrackFilterer
         return lang == "eng" || lang == "en" || lang == "english" || lang == string.Empty;
     }
 
-    private async Task<ProbeOutput> ProbeAudioStreamsAsync(
-        string mediaPath,
-        CancellationToken cancellationToken)
+    /// <summary>
+    /// Finds ffprobe next to the configured ffmpeg binary.
+    /// </summary>
+    internal static string GetFfprobePath(string ffmpegPath)
     {
-        // Use ffprobe to get audio stream info as JSON.
         var ffprobePath = Path.Combine(
-            Path.GetDirectoryName(_ffmpegPath) ?? string.Empty,
+            Path.GetDirectoryName(ffmpegPath) ?? string.Empty,
             "ffprobe");
 
         // If ffprobe doesn't exist next to ffmpeg, try the path without directory
         // (in case ffmpeg is just "ffmpeg" on PATH).
         if (!System.IO.File.Exists(ffprobePath))
         {
-            ffprobePath = _ffmpegPath.Replace("ffmpeg", "ffprobe");
+            ffprobePath = ffmpegPath.Replace("ffmpeg", "ffprobe");
         }
+
+        return ffprobePath;
+    }
+
+    private async Task<ProbeOutput> ProbeAudioStreamsAsync(
+        string mediaPath,
+        CancellationToken cancellationToken)
+    {
+        // Use ffprobe to get audio stream info as JSON.
+        var ffprobePath = GetFfprobePath(_ffmpegPath);
 
         var args = $"-v quiet -print_format json -show_format -show_streams -select_streams a \"{mediaPath}\"";
 
