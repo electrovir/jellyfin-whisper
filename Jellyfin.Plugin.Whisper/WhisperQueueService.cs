@@ -268,10 +268,18 @@ public class WhisperQueueService : IHostedService, IDisposable
 
                     if (consecutiveFailures >= MaxConsecutiveFailures)
                     {
-                        _logger.LogError(
-                            "Whisper queue halted after {Count} consecutive failures. Fix the issue (check binary paths in plugin config) and restart Jellyfin or run the scheduled task to retry.",
-                            consecutiveFailures);
-                        break;
+                        // Clear the queue rather than stopping the consumer so a later scan can refill it.
+                        var cleared = 0;
+                        while (_channel.Reader.TryRead(out var skipped))
+                        {
+                            _pending.TryRemove(skipped.MediaPath, out _);
+                            cleared++;
+                        }
+
+                        consecutiveFailures = 0;
+                        var haltMessage = $"Whisper queue cleared ({cleared} item(s)) after {MaxConsecutiveFailures} consecutive failures. Fix the issue (check binary and model paths in plugin config), then run the \"Process Media with Whisper\" scheduled task or restart Jellyfin to retry.";
+                        _logger.LogError("{Message}", haltMessage);
+                        WhisperFileLogger.Error(haltMessage);
                     }
                 }
                 finally

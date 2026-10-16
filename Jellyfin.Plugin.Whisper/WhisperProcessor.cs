@@ -141,6 +141,12 @@ public class WhisperProcessor
     /// </summary>
     public async Task ProcessAsync(string mediaPath, string outputDir, CancellationToken cancellationToken)
     {
+        if (!File.Exists(_config.WhisperModel))
+        {
+            throw new FileNotFoundException(
+                $"Whisper model not found: '{_config.WhisperModel}'. Set Whisper Model in the plugin settings to the full path of a .bin model file.");
+        }
+
         Directory.CreateDirectory(outputDir);
 
         var wavPath = Path.Combine(outputDir, "audio.wav");
@@ -405,7 +411,7 @@ public class WhisperProcessor
 
         var exitCode = await RunProcessAsync(
             _config.WhisperCppPath,
-            $"--model {_config.WhisperModel} {dtwArguments}--output-json-full --output-file \"{outputFileBase}\" \"{wavPath}\"",
+            $"--model \"{_config.WhisperModel}\" {dtwArguments}--output-json-full --output-file \"{outputFileBase}\" \"{wavPath}\"",
             "whisper-cpp",
             cancellationToken).ConfigureAwait(false);
 
