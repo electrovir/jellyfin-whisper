@@ -260,6 +260,9 @@ public class AudioTrackFilterer
         // Count total audio streams in original to know the output audio index offset.
         var originalAudioCount = allStreams.Count;
 
+        // A previous filtering pass unset default on the originals, so on a re-filter none of them is default.
+        var defaultStream = englishStreams.FirstOrDefault(s => s.IsDefault) ?? englishStreams[0];
+
         // Encode and filter each new audio track.
         for (var i = 0; i < englishStreams.Count; i++)
         {
@@ -292,8 +295,8 @@ public class AudioTrackFilterer
             args.Add($"-metadata:s:a:{outputAudioIndex}");
             args.Add("language=eng");
 
-            // Only set the filtered copy of the original default track as default.
-            if (stream.IsDefault)
+            // Only set one filtered track as default.
+            if (stream == defaultStream)
             {
                 args.Add($"-disposition:a:{outputAudioIndex}");
                 args.Add("default");
@@ -361,6 +364,23 @@ public class AudioTrackFilterer
             "pcm_s16le" or "pcm_s24le" or "pcm_s32le" => ("flac", "0"),
             _ => ("aac", isSurround ? "640k" : "256k"),
         };
+    }
+
+    /// <summary>
+    /// Returns the stream index of the original audio track to transcribe, or null when there is no audio.
+    /// Filtered tracks are skipped because their mute words are already silenced.
+    /// </summary>
+    public async Task<int?> FindTranscriptionStreamIndexAsync(string mediaPath, CancellationToken cancellationToken)
+    {
+        var probeOutput = await ProbeAudioStreamsAsync(mediaPath, cancellationToken).ConfigureAwait(false);
+
+        return probeOutput.Streams
+            .Where(s => !(s.Title ?? string.Empty).StartsWith(FilteredTrackPrefix, StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(IsEnglishTrack)
+            .ThenByDescending(s => s.IsDefault)
+            .ThenByDescending(s => s.Channels)
+            .Select(s => (int?)s.Index)
+            .FirstOrDefault();
     }
 
     private static bool IsEnglishTrack(AudioStreamInfo stream)

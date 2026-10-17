@@ -251,8 +251,15 @@ public class WhisperProcessor
             File.Delete(subtitlesPath);
         }
 
+        // Without an explicit map, ffmpeg picks the default audio track, which is the muted filtered track
+        // on files this plugin has already processed.
+        var audioStreamIndex = await new AudioTrackFilterer(_config.FfmpegPath, _logger)
+            .FindTranscriptionStreamIndexAsync(inputPath, cancellationToken)
+            .ConfigureAwait(false);
+        var audioMap = audioStreamIndex == null ? string.Empty : $"-map 0:{audioStreamIndex} ";
+
         // Extract audio as 16 kHz mono 16-bit PCM WAV (required by whisper.cpp).
-        var audioArguments = $"-i \"{inputPath}\" -ar 16000 -ac 1 -c:a pcm_s16le \"{wavPath}\" -y";
+        var audioArguments = $"-i \"{inputPath}\" {audioMap}-ar 16000 -ac 1 -c:a pcm_s16le \"{wavPath}\" -y";
 
         var subtitleStreamIndex = await FindTextSubtitleStreamAsync(inputPath, cancellationToken).ConfigureAwait(false);
         if (subtitleStreamIndex != null)
